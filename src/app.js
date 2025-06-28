@@ -2,30 +2,64 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
+const expressSession = require('express-session');
+const passport = require('passport');
 
-dotenv.config(); // ✅ Moved to top
+dotenv.config(); // ✅ Load env
 
+require('./config/auth');
 const employeeRoutes = require('./routes/employeeRoutes');
 
-const app = express();
+const app = express(); // ✅ MUST come before app.use()
 
+// Session + Passport Setup
+app.use(expressSession({
+  secret: process.env.SESSION_SECRET,
+  resave: false,
+  saveUninitialized: false
+}));
+app.use(passport.initialize());
+app.use(passport.session());
+
+// Debug logger
 app.use((req, res, next) => {
   console.log(`🛰️ Incoming Request: ${req.method} ${req.url}`);
   next();
 });
 
-
-// Middleware
+// Middlewares
 app.use(cors());
 app.use(express.json());
+
+// Auth Routes
+app.get('/auth/google',
+  passport.authenticate('google', { scope: ['profile', 'email'] }));
+
+app.get('/auth/google/callback',
+  passport.authenticate('google', {
+    failureRedirect: '/login',
+    successRedirect: '/dashboard'
+  })
+);
+app.get('/me', (req, res) => {
+    if (req.isAuthenticated()) {
+      res.json(req.user);
+    } else {
+      res.status(401).send('Not logged in');
+    }
+  });
+  
+
+app.get('/logout', (req, res) => {
+  req.logout(() => res.redirect('/'));
+});
 
 // Routes
 app.use('/api/employees', employeeRoutes);
 
-
 app.get('/health', (req, res) => res.send('API is running 🚀'));
 
-// Connect to DB
+// Connect DB and Start Server
 const PORT = process.env.PORT || 8080;
 mongoose
   .connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
