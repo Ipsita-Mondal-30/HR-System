@@ -51,6 +51,16 @@ app.get('/me', (req, res) => {
   
   const jobRoutes = require('./routes/jobRoutes');
   app.use('/api/jobs', jobRoutes);
+
+  const departmentRoutes = require('./routes/departmentRoutes');
+app.use('/api/departments', departmentRoutes);
+
+const roleRoutes = require('./routes/roleRoutes');
+app.use('/api/roles', roleRoutes);
+
+const applicationRoutes = require('./routes/applicationRoutes');
+app.use('/api/applications', applicationRoutes);
+
   
   
 app.get('/logout', (req, res) => {
