@@ -49,9 +49,13 @@ app.get('/me', (req, res) => {
     }
   });
   
-
+  const jobRoutes = require('./routes/jobRoutes');
+  app.use('/api/jobs', jobRoutes);
+  
+  
 app.get('/logout', (req, res) => {
   req.logout(() => res.redirect('/'));
+
 });
 
 // Routes
@@ -61,6 +65,10 @@ app.get('/health', (req, res) => res.send('API is running 🚀'));
 
 // Connect DB and Start Server
 const PORT = process.env.PORT || 8080;
+app.use((req, res) => {
+    res.status(404).send(`🔍 Route not found: ${req.method} ${req.originalUrl}`);
+  });
+  
 mongoose
   .connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
   .then(() => app.listen(PORT, () => console.log(`Server running on port ${PORT}`)))
