@@ -61,6 +61,9 @@ app.use('/api/roles', roleRoutes);
 const applicationRoutes = require('./routes/applicationRoutes');
 app.use('/api/applications', applicationRoutes);
 
+const agentRoutes = require('./routes/agentRoutes');
+app.use('/api/agent', agentRoutes);
+
   
   
 app.get('/logout', (req, res) => {
