@@ -3,33 +3,40 @@ const { uploadResume } = require('../config/cloudinary');
 const fs = require('fs');
 
 exports.submitApplication = async (req, res) => {
-  try {
-    const { name, email, phone, portfolio, jobId } = req.body;
-    const file = req.file;
-
-    if (!file) {
-      return res.status(400).json({ error: 'Resume file is required' });
+    try {
+      console.log("🛰️ Incoming Request: POST /api/applications");
+      console.log("📦 Body:", JSON.stringify(req.body, null, 2));
+      if (req.file) {
+        console.log("📎 File Info:", req.file);
+      } else {
+        console.log("⚠️ No file attached!");
+      }
+  
+      const { name, email, phone, portfolio, jobId } = req.body;
+      const file = req.file;
+  
+      if (!file) {
+        return res.status(400).json({ error: 'Resume file is required' });
+      }
+  
+      const resumeUrl = await uploadResume(file.path);
+  
+      const application = await Application.create({
+        name,
+        email,
+        phone,
+        portfolio,
+        resumeUrl,
+        job: jobId,
+      });
+  
+      res.status(201).json({ message: 'Application submitted', application });
+    } catch (err) {
+      console.error('❌ Application Error:', err);
+      res.status(500).json({ error: 'Failed to submit application' });
     }
-
-    // ✅ Upload to Cloudinary using the wrapper function
-    const resumeUrl = await uploadResume(file.path);
-
-    // ✅ Create application document
-    const application = await Application.create({
-      name,
-      email,
-      phone,
-      portfolio,
-      resumeUrl, // use the one returned by uploadResume
-      job: jobId,
-    });
-
-    res.status(201).json({ message: 'Application submitted', application });
-  } catch (err) {
-    console.error('❌ Application Error:', err);
-    res.status(500).json({ error: 'Failed to submit application' });
-  }
-};
+  };
+  
 
 // 🔍 View applications (optional filter by job)
 exports.getApplications = async (req, res) => {

@@ -5,7 +5,8 @@ const Application = require('../models/Application');
 const getMatchScore = async (req, res) => {
   try {
     const { applicationId } = req.params;
-    console.log("🛰️ Incoming Request:", req.originalUrl);
+    console.log("🛰️ Incoming Request:", JSON.stringify(req.body, null, 2));
+
     console.log("🔍 Application ID received:", applicationId);
 
     const application = await Application.findById(applicationId).populate('job');
