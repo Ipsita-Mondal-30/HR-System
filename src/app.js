@@ -86,6 +86,17 @@ const PORT = process.env.PORT || 8080;
 app.use((req, res) => {
     res.status(404).send(`🔍 Route not found: ${req.method} ${req.originalUrl}`);
   });
+  // ... existing code ...
+
+// Global error handler for JSON errors
+app.use((err, req, res, next) => {
+  console.error('Global error handler:', err);
+  res.status(500).json({ error: err.message || 'Internal Server Error' });
+});
+app.use((req, res, next) => {
+  console.log('Headers:', req.headers);
+  next();
+});
   
 mongoose
   .connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
