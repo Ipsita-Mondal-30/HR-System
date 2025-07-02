@@ -2,6 +2,12 @@ const axios = require('axios');
 const pdfParse = require('pdf-parse');
 const Application = require('../models/Application');
 const { sendEmail } = require('../utils/email');
+const { CohereClient } = require("cohere-ai"); // ✅ New import
+
+const cohere = new CohereClient({
+  token: process.env.COHERE_API_KEY, // ✅ No .init()
+});
+
 
 function extractSkills(text) {
   const skillList = [
@@ -9,7 +15,6 @@ function extractSkills(text) {
     'JavaScript', 'Python', 'TypeScript', 'Docker', 'Kubernetes',
     'AWS', 'CI/CD', 'Git', 'PostgreSQL', 'MySQL'
   ];
-
   return skillList.filter(skill =>
     new RegExp(`\\b${skill}\\b`, 'i').test(text)
   );
@@ -18,16 +23,13 @@ function extractSkills(text) {
 const getMatchScore = async (req, res) => {
   try {
     const { applicationId } = req.params;
-    console.log("🛰️ Incoming Request:", JSON.stringify(req.body, null, 2));
-    console.log("🔍 Application ID received:", applicationId);
 
     const application = await Application.findById(applicationId)
-    .populate({
-      path: 'job',
-      populate: { path: 'createdBy', select: 'email' }
-    });
-    if (!application) return res.status(404).json({ error: "Application not found" });
-    if (!application.job) return res.status(404).json({ error: "Job not found for this application" });
+      .populate({ path: 'job', populate: { path: 'createdBy', select: 'email' } });
+
+    if (!application || !application.job) {
+      return res.status(404).json({ error: "Application or job not found" });
+    }
 
     const { resumeUrl } = application;
     const { description } = application.job;
@@ -35,86 +37,125 @@ const getMatchScore = async (req, res) => {
     const candidateEmail = application.email;
     const candidateName = application.name;
     const jobTitle = application.job.title;
-    const resumeLink = application.resumeUrl;
 
-    console.log("📄 Resume URL:", resumeUrl);
-
-    // Step 1: Download PDF from Cloudinary
     const response = await axios.get(resumeUrl, { responseType: 'arraybuffer' });
-    const resumeBuffer = response.data;
-
-    // Step 2: Extract text
-    const resumeData = await pdfParse(resumeBuffer);
+    const resumeData = await pdfParse(response.data);
     const resumeText = resumeData.text;
 
-    // Step 3: Match logic
+    // Step 1: Keyword Matching
     const resumeSkills = extractSkills(resumeText);
     const jdSkills = extractSkills(description);
-
     const matchingSkills = resumeSkills.filter(skill => jdSkills.includes(skill));
     const missingSkills = jdSkills.filter(skill => !resumeSkills.includes(skill));
-    const score = Math.round((matchingSkills.length / jdSkills.length) * 100) || 0;
+    const keywordScore = Math.round((matchingSkills.length / jdSkills.length) * 100) || 0;
 
-    // Save score in DB
-    application.matchScore = score;
-    await application.save();
+    // Step 2: Cohere Evaluation
+    const prompt = `
+You are an AI assistant helping to evaluate a job application. Based on the resume text and job description, give:
+1. A match score between 0 and 100.
+2. A one-line explanation.
+3. Tags (skills or roles) in JSON array format.
 
-    // Email to HR
-    if (hrEmail) {
-      let subject, html;
+Resume:
+${resumeText}
 
-      if (score >= 85) {
-        subject = `🌟 Strong Candidate: ${candidateName}`;
-        html = `
-          <h3>Top Match Found!</h3>
-          <p><b>${candidateName}</b> scored <b>${score}</b>/100 for <strong>${jobTitle}</strong>.</p>
-          <p><a href="${resumeLink}">📄 View Resume</a></p>`;
-      } else if (score >= 60) {
-        subject = `🤔 Medium Match: ${candidateName}`;
-        html = `
-          <h3>Medium Fit Candidate</h3>
-          <p><b>${candidateName}</b> scored <b>${score}</b> for <strong>${jobTitle}</strong>.</p>
-          <p><a href="${resumeLink}">📄 View Resume</a></p>`;
-      } else {
-        subject = `⚠️ Low Match: ${candidateName}`;
-        html = `
-          <h3>Low Fit Detected</h3>
-          <p><b>${candidateName}</b> scored <b>${score}</b> for <strong>${jobTitle}</strong>.</p>
-          <p><a href="${resumeLink}">📄 View Resume</a></p>`;
-      }
+Job Description:
+${description}
 
-      await sendEmail({ to: hrEmail, subject, html });
-      console.log("📬 Email sent to HR:", subject);
+Respond in the format:
+{
+  "matchScore": 82,
+  "explanation": "Strong alignment with backend technologies.",
+  "tags": ["Java", "Spring Boot", "MongoDB"]
+}
+    `.trim();
+
+    const cohereResponse = await cohere.chat({
+      model: "command-r",
+      message: `You are a smart hiring assistant. A candidate has applied for a job. Give a match score between 0 to 100 based on how well the resume matches the job description.
+      
+    Resume:
+    ${resumeText}
+    
+    Job Description:
+    ${description}
+    
+    Respond in JSON format:
+    {
+      "matchScore": number (0-100),
+      "explanation": string,
+      "tags": string[]
     }
-
-    // Email to candidate
-    if (candidateEmail) {
-    await sendEmail({
-      to: candidateEmail,
-      subject: `Your Application Score for "${jobTitle}"`,
-      html: `
-        <h3>Thanks for Applying!</h3>
-        <p>You scored <b>${score}</b>/100 for <strong>${jobTitle}</strong>.</p>
-        ${
-          score >= 85
-            ? `<p>We're excited by your profile. Expect to hear from us soon!</p>`
-            : score >= 60
-            ? `<p>We'll evaluate and may reach out for next steps.</p>`
-            : `<p>Currently, we're prioritizing stronger matches. We'll keep you in our system.</p>`
-        }`
+    `,
+      temperature: 0.3,
     });
-    }
 
-    // Final response
-    res.json({
-      matchScore: score,
+  // Remove code block markers if present
+  let jsonText = cohereResponse.text.trim();
+  if (jsonText.startsWith('```')) {
+    jsonText = jsonText.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+  }
+  const parsed = JSON.parse(jsonText); // Now safe to parse
+
+
+    const finalScore = Math.round((keywordScore + parsed.matchScore) / 2);
+
+    // Step 3: Save to DB
+    application.matchScore = finalScore;
+    application.matchInsights = {
+      explanation: parsed.explanation,
+      tags: parsed.tags,
       matchingSkills,
       missingSkills,
+    };
+    await application.save();
+
+    // Step 4: Notify HR
+    if (hrEmail) {
+      let subject, html;
+      if (finalScore >= 85) {
+        subject = `🌟 Strong Candidate: ${candidateName}`;
+        html = `<h3>Top Match Found!</h3>
+          <p><b>${candidateName}</b> scored <b>${finalScore}</b>/100 for <strong>${jobTitle}</strong>.</p>
+          <p>AI Tags: ${parsed.tags.join(', ')}</p>
+          <p><a href="${resumeUrl}">📄 View Resume</a></p>`;
+      } else if (finalScore >= 60) {
+        subject = `🤔 Medium Match: ${candidateName}`;
+        html = `<h3>Medium Fit</h3>
+          <p><b>${candidateName}</b> scored <b>${finalScore}</b> for <strong>${jobTitle}</strong>.</p>
+          <p>AI Tags: ${parsed.tags.join(', ')}</p>
+          <p><a href="${resumeUrl}">📄 View Resume</a></p>`;
+      } else {
+        subject = `⚠️ Low Match: ${candidateName}`;
+        html = `<h3>Low Fit</h3>
+          <p><b>${candidateName}</b> scored <b>${finalScore}</b> for <strong>${jobTitle}</strong>.</p>
+          <p>AI Tags: ${parsed.tags.join(', ')}</p>
+          <p><a href="${resumeUrl}">📄 View Resume</a></p>`;
+      }
+      await sendEmail({ to: hrEmail, subject, html });
+    }
+
+    // Step 5: Notify Candidate
+    if (candidateEmail) {
+      await sendEmail({
+        to: candidateEmail,
+        subject: `Your Application Score for "${jobTitle}"`,
+        html: `
+          <h3>Thanks for Applying!</h3>
+          <p>You scored <b>${finalScore}</b>/100 for <strong>${jobTitle}</strong>.</p>
+          <p>Feedback: ${parsed.explanation}</p>
+        `
+      });
+    }
+
+    // Step 6: Final Response
+    res.json({
+      matchScore: finalScore,
+      explanation: parsed.explanation,
+      matchingSkills,
+      missingSkills,
+      tags: parsed.tags,
       resumePreview: resumeText.slice(0, 300),
-      jobDescription: description.slice(0, 300),
-      reason: score > 80
-        ? "Strong match – candidate has most required skills."
-        : "Weaker match – missing some key job requirements."
     });
 
   } catch (err) {
