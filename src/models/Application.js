@@ -7,6 +7,8 @@ const applicationSchema = new mongoose.Schema({
   portfolio: String,
   resumeUrl: String,
   job: { type: mongoose.Schema.Types.ObjectId, ref: 'Job' },
+  matchScore: { type: Number, default: null },
+
   createdAt: { type: Date, default: Date.now }
 });
 
