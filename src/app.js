@@ -64,6 +64,9 @@ app.use('/api/applications', applicationRoutes);
 const agentRoutes = require('./routes/agentRoutes');
 app.use('/api/agent', agentRoutes);
 
+const analyticsRoutes = require('./routes/analytics');
+app.use('/api/analytics', analyticsRoutes);
+
 app.use((req, res, next) => {
     console.log(`🛰️ Incoming Request: ${req.method} ${req.url}`);
     console.log("📦 Body:", JSON.stringify(req.body));
