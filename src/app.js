@@ -10,6 +10,9 @@ dotenv.config(); // ✅ Load env
 require('./config/auth');
 const employeeRoutes = require('./routes/employeeRoutes');
 
+
+
+
 const app = express(); // ✅ MUST come before app.use()
 
 // Session + Passport Setup
@@ -20,6 +23,11 @@ app.use(expressSession({
 }));
 app.use(passport.initialize());
 app.use(passport.session());
+
+app.use(cors({
+    origin: 'http://localhost:3000', // frontend URL
+    credentials: true
+  }));
 
 // Debug logger
 app.use((req, res, next) => {
@@ -66,6 +74,10 @@ app.use('/api/agent', agentRoutes);
 
 const analyticsRoutes = require('./routes/analytics');
 app.use('/api/analytics', analyticsRoutes);
+
+const adminRoutes = require('./routes/adminRoutes');
+app.use('/api/admin', adminRoutes);
+
 
 app.use((req, res, next) => {
     console.log(`🛰️ Incoming Request: ${req.method} ${req.url}`);
