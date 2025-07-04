@@ -11,7 +11,9 @@ const applicationSchema = new mongoose.Schema({
   matchInsights: {
     matchScore: Number,
     explanation: String,
-    tags: [String]
+    matchingSkills: [String],
+    missingSkills: [String],
+    tags: [String],
   },
   createdAt: { type: Date, default: Date.now }
 });
