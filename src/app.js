@@ -36,7 +36,6 @@ app.use((req, res, next) => {
 });
 
 // Middlewares
-app.use(cors());
 app.use(express.json());
 
 // Auth Routes
