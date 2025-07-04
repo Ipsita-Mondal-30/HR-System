@@ -103,7 +103,7 @@ Respond in the format:
     // Step 3: Save to DB
     application.matchScore = finalScore;
     application.matchInsights = {
-      matchScore: parsed.score,
+      matchScore: parsed.matchScore, // <-- fix here
       explanation: parsed.explanation,
       tags: parsed.tags,
       matchingSkills,

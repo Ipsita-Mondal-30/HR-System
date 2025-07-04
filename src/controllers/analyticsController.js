@@ -26,7 +26,7 @@ const getOverviewStats = async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch overview stats' });
   }
 };
-exports.getMatchDistribution = async (req, res) => {
+const getMatchDistribution = async (req, res) => {
     try {
       const applications = await Application.find({
         'matchInsights.matchScore': { $exists: true }
@@ -47,6 +47,22 @@ exports.getMatchDistribution = async (req, res) => {
       res.status(500).json({ error: "Failed to calculate match distribution" });
     }
   };
-
+  const getSummary = async (req, res) => {
+    try {
+      const jobs = await Job.find().select('title status createdAt');
+      const applications = await Application.find().select('name email matchInsights job');
   
-module.exports = { getOverviewStats };
+      res.json({
+        jobs,
+        applications,
+      });
+    } catch (err) {
+      console.error("📉 Summary Error:", err.message);
+      res.status(500).json({ error: "Failed to fetch summary" });
+    }
+  };
+  
+  
+// ... existing code ...
+module.exports = { getOverviewStats, getSummary, getMatchDistribution };
+

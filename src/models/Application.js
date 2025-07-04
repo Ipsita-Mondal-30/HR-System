@@ -9,6 +9,7 @@ const applicationSchema = new mongoose.Schema({
   job: { type: mongoose.Schema.Types.ObjectId, ref: 'Job' },
   matchScore: { type: Number, default: null },
   matchInsights: {
+    matchScore: Number,
     explanation: String,
     tags: [String]
   },
