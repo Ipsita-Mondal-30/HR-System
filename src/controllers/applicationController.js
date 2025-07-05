@@ -40,8 +40,9 @@ exports.getApplications = async (req, res) => {
     }
 
     const applications = await Application.find(filter)
-      .populate('job', 'title')
-      .sort({ createdAt: -1 });
+    .populate('job', 'title')
+    .sort({ matchScore: -1, createdAt: -1 }); // NEW: sort by score first
+  
 
     res.status(200).json(applications);
   } catch (err) {

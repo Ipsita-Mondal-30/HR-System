@@ -26,6 +26,7 @@ const getOverviewStats = async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch overview stats' });
   }
 };
+
 const getMatchDistribution = async (req, res) => {
     try {
       const applications = await Application.find({
