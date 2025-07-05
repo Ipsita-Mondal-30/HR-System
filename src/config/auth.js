@@ -13,14 +13,27 @@ passport.use(new GoogleStrategy({
       let user = await User.findOne({ googleId: profile.id });
       if (user) return done(null, user);
 
-      // Create new user with null role
-      user = await User.create({
+      const existingUser = await User.findOne({
+        $or: [{ googleId: profile.id }, { email: profile.emails[0].value }],
+      });
+      
+      if (existingUser) {
+        // Optional: attach googleId if not already linked
+        if (!existingUser.googleId) {
+          existingUser.googleId = profile.id;
+          await existingUser.save();
+        }
+        return done(null, existingUser);
+      }
+      
+      // If no user found, create a new one
+      const newUser = await User.create({
         googleId: profile.id,
         name: profile.displayName,
         email: profile.emails[0].value,
-        role: null // Important: No role yet
       });
-      done(null, user);
+      done(null, newUser);
+      
     } catch (err) {
       done(err, null);
     }

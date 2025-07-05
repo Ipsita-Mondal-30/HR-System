@@ -64,5 +64,15 @@ router.get('/me', (req, res) => {
     const { _id, name, email, role } = req.user;
     res.json({ _id, name, email, role });
   });
+  router.get('/logout', (req, res) => {
+    req.logout((err) => {
+      if (err) return res.status(500).send("Logout error");
+      req.session.destroy(() => {
+        res.clearCookie('connect.sid');
+        res.send('Logged out');
+      });
+    });
+  });
+  
 
 module.exports = router;

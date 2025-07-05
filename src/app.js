@@ -111,10 +111,7 @@ app.use((req, res, next) => {
   });
   
   
-app.get('/logout', (req, res) => {
-  req.logout(() => res.redirect('/'));
 
-});
 
 app.get('/api/me', (req, res) => {
     if (req.isAuthenticated()) {
