@@ -102,6 +102,8 @@ app.use('/api/analytics', analyticsRoutes);
 
 
 app.use('/api/admin', require('./routes/adminRoutes'));
+app.use('/api/users', require('./routes/userRoutes'));
+
 
 
 

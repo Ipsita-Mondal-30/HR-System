@@ -9,6 +9,7 @@ const { isHR } = require('../middleware/auth');
 
 const router = express.Router();
 
+
 router.post('/', isHR, createJob);
 router.get('/', getJobs);
 router.get('/:id', getJobById);

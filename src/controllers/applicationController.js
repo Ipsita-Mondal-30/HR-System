@@ -30,6 +30,14 @@ exports.submitApplication = async (req, res) => {
     res.status(500).json({ error: 'Failed to submit application', details: err.message });
   }
 };
+Application.find()
+  .populate('candidate', 'name email')
+  .populate('job', 'title department')
+  .populate({
+    path: 'job',
+    populate: { path: 'department', select: 'name' }
+  })
+
 
 // 🔍 View applications (optional filter by job)
 exports.getApplications = async (req, res) => {
