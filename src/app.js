@@ -100,8 +100,9 @@ app.use('/api/agent', agentRoutes);
 const analyticsRoutes = require('./routes/analytics');
 app.use('/api/analytics', analyticsRoutes);
 
-const adminRoutes = require('./routes/adminRoutes');
-app.use('/api/admin', adminRoutes);
+
+app.use('/api/admin', require('./routes/adminRoutes'));
+
 
 
 app.use((req, res, next) => {

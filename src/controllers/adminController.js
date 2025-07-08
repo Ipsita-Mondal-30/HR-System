@@ -1,29 +1,40 @@
+// controllers/adminController.js
 const Job = require('../models/Job');
 const Application = require('../models/Application');
+const User = require('../models/User');
+const Department = require('../models/Department');
+const Role = require('../models/Role');
 
-exports.getDashboardStats = async (req, res) => {
+const getAdminStats = async (req, res) => {
   try {
-    const totalJobs = await Job.countDocuments();
-    const totalApplications = await Application.countDocuments();
+    const [jobsCount, applicationsCount, hrCount, candidateCount, departmentsCount, rolesCount, matchStats] =
+      await Promise.all([
+        Job.countDocuments(),
+        Application.countDocuments(),
+        User.countDocuments({ role: 'hr' }),
+        User.countDocuments({ role: 'candidate' }),
+        Department.countDocuments(),
+        Role.countDocuments(),
+        Application.aggregate([
+          { $group: { _id: null, avgScore: { $avg: "$matchScore" } } }
+        ])
+      ]);
 
-    const matchScores = await Application.aggregate([
-      { $match: { matchScore: { $exists: true } } },
-      { $group: { _id: null, avg: { $avg: "$matchScore" } } }
-    ]);
-
-    const openJobs = await Job.countDocuments({ status: 'open' });
-    const closedJobs = await Job.countDocuments({ status: 'closed' });
+    const avgMatchScore = matchStats[0]?.avgScore || 0;
 
     res.json({
-      totalJobs,
-      totalApplications,
-      avgMatchScore: parseFloat((matchScores[0]?.avg || 0).toFixed(2)),
-
-      openJobs,
-      closedJobs
+      jobsCount,
+      applicationsCount,
+      hrCount,
+      candidateCount,
+      departmentsCount,
+      rolesCount,
+      avgMatchScore: avgMatchScore.toFixed(2)
     });
   } catch (err) {
-    console.error("❌ Dashboard Error:", err);
-    res.status(500).json({ error: "Failed to fetch dashboard stats" });
+    console.error("Error fetching admin stats:", err);
+    res.status(500).json({ error: "Error fetching admin statistics" });
   }
 };
+
+module.exports = { getAdminStats };
