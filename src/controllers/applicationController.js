@@ -30,14 +30,39 @@ exports.submitApplication = async (req, res) => {
     res.status(500).json({ error: 'Failed to submit application', details: err.message });
   }
 };
-Application.find()
-  .populate('candidate', 'name email')
-  .populate('job', 'title department')
-  .populate({
-    path: 'job',
-    populate: { path: 'department', select: 'name' }
-  })
+exports.getAllApplications = async (req, res) => {
+    try {
+      const apps = await Application.find()
+        .populate('candidate', 'name email')
+        .populate({
+          path: 'job',
+          select: 'title department',
+          populate: { path: 'department', select: 'name' }
+        });
+      res.json(apps);
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to fetch applications' });
+    }
+  };
+  
 
+  exports.getApplicationById = async (req, res) => {
+    try {
+      const application = await Application.findById(req.params.id)
+        .populate('job', 'title department')
+        .populate('candidate', 'name email');
+  
+      if (!application) {
+        return res.status(404).json({ error: 'Application not found' });
+      }
+  
+      res.json(application);
+    } catch (err) {
+      console.error('🔥 Error in getApplicationById:', err); // 👈 LOG THIS
+      res.status(500).json({ error: 'Failed to fetch application' });
+    }
+  };
+  
 
 // 🔍 View applications (optional filter by job)
 exports.getApplications = async (req, res) => {

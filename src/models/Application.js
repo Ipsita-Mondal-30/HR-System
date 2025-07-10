@@ -15,7 +15,22 @@ const applicationSchema = new mongoose.Schema({
     missingSkills: [String],
     tags: [String],
   },
+  candidate: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User', // ✅ Make sure 'User' is the model name for candidates
+    required: true,
+  },
+  status: {
+    type: String,
+    enum: ['pending', 'reviewed', 'rejected', 'accepted'],
+    default: 'pending',
+  },
+  resumeText: String,
   createdAt: { type: Date, default: Date.now }
 });
+
+
+
+
 
 module.exports = mongoose.model('Application', applicationSchema);

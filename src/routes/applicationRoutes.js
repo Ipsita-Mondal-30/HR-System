@@ -11,5 +11,7 @@ router.post(
 );
 
 router.get('/', applicationController.getApplications);
+router.get('/:id', applicationController.getApplicationById);
+
 
 module.exports = router;
