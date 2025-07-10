@@ -14,6 +14,8 @@ router.get('/', applicationController.getApplications);
 router.get('/:id', applicationController.getApplicationById);
 // Get applications for a specific job
 router.get('/job/:jobId', applicationController.getApplicationsByJob);
+// PUT route to update application status
+router.put('/:id', applicationController.updateApplicationStatus);
 
 
 

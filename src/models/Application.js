@@ -18,7 +18,7 @@ const applicationSchema = new mongoose.Schema({
   candidate: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User', // ✅ Make sure 'User' is the model name for candidates
-    required: true,
+    required: false,
   },
   status: {
     type: String,

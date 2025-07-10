@@ -1,35 +1,41 @@
 const Application = require('../models/Application');
 const fs = require('fs');
-
+const  email  = require('../utils/email');
+const agent = require('../controllers/agentController'); // or correct path
 exports.submitApplication = async (req, res) => {
-  try {
-    console.log("BODY:", req.body);
-    console.log("FILE:", req.file);
-
-    const { name, email, phone, portfolio, jobId } = req.body;
-    const file = req.file;
-
-    if (!file) {
-      return res.status(400).json({ error: 'Resume file is required' });
+    try {
+      const { name, email, phone, portfolio, jobId } = req.body;
+  
+      console.log("📩 Incoming Application:", req.body);
+      console.log("📎 Uploaded File:", req.file);
+  
+      if (!req.file) return res.status(400).json({ error: 'Resume is required' });
+  
+      const resumeUrl = req.file.path;
+  
+      const application = new Application({
+        name,
+        email,
+        phone,
+        portfolio,
+        job: jobId,
+        resumeUrl,
+      });
+      
+  
+      await application.save();
+  
+      // ✅ Run the agentic evaluation
+    
+      await agent.getMatchScore({ params: { applicationId: application._id } }, { json: () => {}, status: () => ({ json: () => {} }) });
+  
+      res.status(201).json(application);
+    } catch (err) {
+      console.error('❌ Application submission failed:', err);
+      res.status(500).json({ error: 'Server error while submitting application' });
     }
-
-    const resumeUrl = file.path; // Cloudinary URL
-
-    const application = await Application.create({
-      name,
-      email,
-      phone,
-      portfolio,
-      resumeUrl,
-      job: jobId,
-    });
-
-    res.status(201).json({ message: 'Application submitted', application });
-  } catch (err) {
-    console.error('❌ Application Error:', err);
-    res.status(500).json({ error: 'Failed to submit application', details: err.message });
-  }
-};
+  };
+  
 exports.getAllApplications = async (req, res) => {
     try {
       const apps = await Application.find()
@@ -79,6 +85,37 @@ exports.getApplicationsByJob = async (req, res) => {
     }
   };
     
+exports.updateApplicationStatus = async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { status } = req.body;
+  
+      const application = await Application.findById(id).populate('job');
+      if (!application) return res.status(404).json({ error: 'Application not found' });
+  
+      application.status = status;
+      await application.save();
+  
+      // Optionally send feedback email to candidate
+      if (status === 'rejected' || status === 'shortlisted') {
+        await sendEmail({
+          to: application.email,
+          subject: `Update on your "${application.job.title}" application`,
+          html: `
+            <h3>Your application has been marked as <b>${status}</b></h3>
+            <p>Match Score: ${application.matchScore}/100</p>
+            <p>AI Feedback: ${application.matchInsights?.explanation || 'No feedback available'}</p>
+          `
+        });
+      }
+  
+      res.json({ success: true, application });
+    } catch (err) {
+      console.error("⚠️ Status Update Error:", err.message);
+      res.status(500).json({ error: "Failed to update status" });
+    }
+  };
+  
 
 // 🔍 View applications (optional filter by job)
 exports.getApplications = async (req, res) => {
