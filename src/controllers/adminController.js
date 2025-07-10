@@ -37,4 +37,54 @@ const getAdminStats = async (req, res) => {
   }
 };
 
-module.exports = { getAdminStats };
+const getHRDashboardData = async (req, res) => {
+  try {
+    const [totalJobs, openJobs, closedJobs] = await Promise.all([
+      Job.countDocuments(),
+      Job.countDocuments({ status: 'open' }),
+      Job.countDocuments({ status: 'closed' }),
+    ]);
+
+    const totalApplications = await Application.countDocuments();
+
+    const avgScoreAgg = await Application.aggregate([
+      { $match: { matchScore: { $exists: true } } },
+      { $group: { _id: null, avg: { $avg: "$matchScore" } } },
+    ]);
+    const avgMatchScore = avgScoreAgg[0]?.avg || 0;
+
+    const recentApplications = await Application.find()
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .populate('job', 'title')
+      .populate('candidate', 'name email');
+
+    const formatted = recentApplications.map((app) => ({
+      _id: app._id,
+      name: app.candidate?.name || 'N/A',
+      email: app.candidate?.email || 'N/A',
+      job: { title: app.job?.title || 'N/A' },
+      matchScore: app.matchScore,
+    }));
+
+    res.json({
+      totalJobs,
+      openJobs,
+      closedJobs,
+      totalApplications,
+      avgMatchScore,
+      recentApplications: formatted,
+    });
+  } catch (err) {
+    console.error('Dashboard Error:', err);
+    res.status(500).json({ error: 'Failed to fetch dashboard data' });
+  }
+};
+
+
+
+module.exports = {
+    getAdminStats,
+    getHRDashboardData
+  };
+  

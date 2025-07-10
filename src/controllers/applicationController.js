@@ -62,7 +62,23 @@ exports.getAllApplications = async (req, res) => {
       res.status(500).json({ error: 'Failed to fetch application' });
     }
   };
+// Get all applications for a specific job
+exports.getApplicationsByJob = async (req, res) => {
+    try {
+      const jobId = req.params.jobId;
   
+      const applications = await Application.find({ job: jobId })
+        .populate('candidate', 'name email')
+        .populate('job', 'title')
+        .sort({ matchScore: -1 }); // optional: sort by matchScore
+  
+      res.json(applications);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to fetch applications for this job' });
+    }
+  };
+    
 
 // 🔍 View applications (optional filter by job)
 exports.getApplications = async (req, res) => {
