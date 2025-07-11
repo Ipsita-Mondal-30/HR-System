@@ -91,32 +91,31 @@ exports.updateApplicationStatus = async (req, res) => {
       const { status } = req.body;
   
       const application = await Application.findById(id).populate('job');
-      if (!application) return res.status(404).json({ error: 'Application not found' });
+      if (!application) {
+        return res.status(404).json({ error: 'Application not found' });
+      }
   
       application.status = status;
       await application.save();
   
-      // Optionally send feedback email to candidate
-      if (status === 'rejected' || status === 'shortlisted') {
+      // Optional: Send email notification to candidate
+      if (application.email && status) {
         await sendEmail({
           to: application.email,
-          subject: `Update on your "${application.job.title}" application`,
-          html: `
-            <h3>Your application has been marked as <b>${status}</b></h3>
-            <p>Match Score: ${application.matchScore}/100</p>
-            <p>AI Feedback: ${application.matchInsights?.explanation || 'No feedback available'}</p>
-          `
+          subject: `Your application for ${application.job.title} is now ${status}`,
+          html: `<p>Hello ${application.name},</p>
+                 <p>Your application status for <strong>${application.job.title}</strong> has been updated to <b>${status}</b>.</p>
+                 <p>Thanks for applying!</p>`
         });
       }
   
-      res.json({ success: true, application });
-    } catch (err) {
-      console.error("⚠️ Status Update Error:", err.message);
-      res.status(500).json({ error: "Failed to update status" });
+      res.json({ message: 'Status updated successfully', application });
+    } catch (error) {
+      console.error('Error updating status:', error);
+      res.status(500).json({ error: 'Internal server error' });
     }
   };
   
-
 // 🔍 View applications (optional filter by job)
 exports.getApplications = async (req, res) => {
   try {
