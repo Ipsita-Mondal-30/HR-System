@@ -115,6 +115,28 @@ exports.updateApplicationStatus = async (req, res) => {
       res.status(500).json({ error: 'Internal server error' });
     }
   };
+  exports.updateStatus = async (req, res) => {
+    try {
+      const application = await Application.findById(req.params.id);
+      if (!application) {
+        return res.status(404).json({ error: "Application not found" });
+      }
+  
+      const { status } = req.body;
+      if (!status) {
+        return res.status(400).json({ error: "Status is required" });
+      }
+  
+      application.status = status;
+      await application.save();
+  
+      res.json({ success: true, application });
+    } catch (err) {
+      console.error("🔥 Error updating status:", err);
+      res.status(500).json({ error: "Server error while updating status" });
+    }
+  };
+  
   
 // 🔍 View applications (optional filter by job)
 exports.getApplications = async (req, res) => {

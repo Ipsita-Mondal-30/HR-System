@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const upload = require('../middleware/upload'); // Use your cloudinary multer middleware
 const applicationController = require('../controllers/applicationController');
+const { isHRorAdmin } = require('../middleware/auth'); // Middleware to check HR or Admin permissions
 
 router.post(
   '/',
@@ -16,6 +17,8 @@ router.get('/:id', applicationController.getApplicationById);
 router.get('/job/:jobId', applicationController.getApplicationsByJob);
 // PUT route to update application status
 router.put('/:id/status', applicationController.updateApplicationStatus);
+router.put('/:id/status', isHRorAdmin, applicationController.updateStatus);
+
 
 
 module.exports = router;
