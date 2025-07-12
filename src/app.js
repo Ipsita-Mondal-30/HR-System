@@ -99,6 +99,8 @@ app.use('/api/agent', agentRoutes);
 
 const analyticsRoutes = require('./routes/analytics');
 app.use('/api/analytics', analyticsRoutes);
+const interviewRoutes = require('./routes/interviewRoutes');
+app.use('/api/interviews', interviewRoutes);
 
 
 app.use('/api/admin', require('./routes/adminRoutes'));

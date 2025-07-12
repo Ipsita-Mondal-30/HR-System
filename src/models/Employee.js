@@ -1,10 +1,34 @@
 const mongoose = require('mongoose');
 
 const employeeSchema = new mongoose.Schema({
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   name: String,
-  departmentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Department' },
-  roleId: { type: mongoose.Schema.Types.ObjectId, ref: 'Role' }
-});
+  email: String,
+  department: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Department'
+  },
+  role: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Role'
+  },
+  joiningDate: Date,
+  exitDate: Date,
+  timeline: [
+    {
+      title: String,
+      description: String,
+      date: Date,
+      feedback: String
+    }
+  ],
+  learningProgress: [
+    {
+      courseTitle: String,
+      platform: String,
+      completion: Number, // percent
+      certificationUrl: String,
+    }
+  ],
+}, { timestamps: true });
 
 module.exports = mongoose.model('Employee', employeeSchema);
