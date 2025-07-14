@@ -148,14 +148,22 @@ Respond in the format:
         `
       });
     }
-
+    let tags = parsed.tags;
+    if (typeof tags === 'string') {
+      try {
+        tags = JSON.parse(tags.replace(/'/g, '"'));
+      } catch (e) {
+        tags = [];
+      }
+    }
+    
     // Step 6: Final Response
     res.json({
       matchScore: finalScore,
       explanation: parsed.explanation,
       matchingSkills,
       missingSkills,
-      tags: parsed.tags,
+      tags,
       resumePreview: resumeText.slice(0, 300),
     });
 

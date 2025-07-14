@@ -20,6 +20,11 @@ const applicationSchema = new mongoose.Schema({
     ref: 'User', // ✅ Make sure 'User' is the model name for candidates
     required: false,
   },
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+  },  
+  
   status: {
     type: String,
     enum: ['pending', 'reviewed', 'shortlisted', 'rejected'],

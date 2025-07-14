@@ -14,9 +14,9 @@ router.get('/google/callback', passport.authenticate('google', {
   failureRedirect: '/login',
   session: true
 }), (req, res) => {
-  if (!req.user.role) return res.redirect('/select-role');
-  return res.redirect('/redirect');
+  return res.redirect('/select-role'); // For debugging
 });
+
 
 // Get current user info
 router.get('/user', (req, res) => {
@@ -54,16 +54,19 @@ router.get('/redirect', (req, res) => {
   if (role === 'admin') return res.redirect('/admin');
   if (role === 'hr') return res.redirect('/hr');
   if (role === 'candidate') return res.redirect('/candidate');
+  if(role=='employee') return res.redirect('/employee');
 
   res.redirect('/select-role');
 });
 // Get current logged-in user
+// Use this instead
 router.get('/me', (req, res) => {
-    if (!req.user) return res.status(401).json({ error: 'Not logged in' });
-  
-    const { _id, name, email, role } = req.user;
-    res.json({ _id, name, email, role });
-  });
+  if (!req.user) return res.status(401).json({ error: 'Not logged in' });
+
+  const { _id, name, email, role } = req.user;
+  res.json({ _id, name, email, role });
+});
+
   router.get('/logout', (req, res) => {
     req.logout((err) => {
       if (err) return res.status(500).send("Logout error");

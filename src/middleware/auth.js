@@ -19,5 +19,12 @@ exports.isAuthenticated = (req, res, next) => {
     if (req.isAuthenticated() && req.user.role === 'admin') return next();
     return res.status(403).send('Access denied – Admins only');
   };
+exports.isCandidate = (req, res, next) => {
+    if (req.user && req.user.role === 'candidate') {
+      next();
+    } else {
+      return res.status(403).json({ message: 'Access denied: Candidates only' });
+    }
+  };
   
     

@@ -20,6 +20,7 @@ exports.submitApplication = async (req, res) => {
         portfolio,
         job: jobId,
         resumeUrl,
+        user: req.user?._id || null,
       });
       
   
@@ -136,6 +137,19 @@ exports.updateApplicationStatus = async (req, res) => {
       res.status(500).json({ error: "Server error while updating status" });
     }
   };
+
+  // Get applications for the logged-in candidate
+exports.getMyApplications = async (req, res) => {
+    try {
+      const email = req.user.email; // fetched from auth middleware
+      const applications = await Application.find({ email }).populate('job');
+      res.json(applications);
+    } catch (error) {
+      console.error("Error fetching candidate's applications:", error);
+      res.status(500).json({ error: 'Failed to fetch your applications' });
+    }
+  };
+  
   
   
 // 🔍 View applications (optional filter by job)

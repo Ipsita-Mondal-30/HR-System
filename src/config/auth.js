@@ -31,7 +31,9 @@ passport.use(new GoogleStrategy({
         googleId: profile.id,
         name: profile.displayName,
         email: profile.emails[0].value,
+        role: 'candidate', // default role
       });
+      
       done(null, newUser);
       
     } catch (err) {
