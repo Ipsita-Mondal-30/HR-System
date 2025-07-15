@@ -7,7 +7,7 @@ const passport = require('passport');
 
 dotenv.config(); // ✅ Load env
 
-require('./config/auth');
+require('./config/passport');
 const employeeRoutes = require('./routes/employeeRoutes');
 
 
