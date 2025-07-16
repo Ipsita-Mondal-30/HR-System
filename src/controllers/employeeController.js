@@ -1,18 +1,34 @@
+// controllers/employeeController.js
 const Employee = require('../models/Employee');
 
+// GET /employees
 const getAllEmployees = async (req, res) => {
-  const employees = await Employee.find();
-  res.json(employees);
-  console.log("REQ BODY:", req.body);
-
+  try {
+    const employees = await Employee.find().populate('department role');
+    res.status(200).json(employees);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch employees' });
+  }
 };
 
-
+// POST /employees
 const createEmployee = async (req, res) => {
-    console.log("💥 HIT: createEmployee");
-    const { name, department, role } = req.body;
-    const newEmp = await Employee.create({ name, department, role });
-    res.status(201).json(newEmp);
-  };
+  try {
+    const { name, email, department, role, joiningDate } = req.body;
+    const employee = await Employee.create({
+      name,
+      email,
+      department,
+      role,
+      joiningDate,
+    });
+    res.status(201).json(employee);
+  } catch (err) {
+    res.status(400).json({ error: 'Failed to create employee' });
+  }
+};
 
-module.exports = { getAllEmployees, createEmployee };
+module.exports = {
+  getAllEmployees,
+  createEmployee,
+};

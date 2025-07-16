@@ -1,81 +1,95 @@
-// src/routes/auth.js (or wherever your auth routes are)
+// routes/authRoute.js
 const express = require('express');
-const router = express.Router();
+const jwt = require('jsonwebtoken');
 const passport = require('passport');
+const router = express.Router();
 const User = require('../models/User');
 
-// Start OAuth flow
+// Google Login Start
 router.get('/google', passport.authenticate('google', {
   scope: ['profile', 'email']
 }));
 
-// OAuth Callback
-router.get('/google/callback', passport.authenticate('google', {
-  failureRedirect: '/login',
-  session: true
-}), (req, res) => {
-  return res.redirect('/select-role'); // For debugging
+// Google OAuth callback
+
+router.get('/google/callback', passport.authenticate('google', { session: false }), (req, res) => {
+  const user = req.user;
+
+  const token = jwt.sign(
+    {
+      id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role || null, // default is null
+    },
+    process.env.JWT_SECRET,
+    { expiresIn: '7d' }
+  );
+
+  // Redirect to select-role page on frontend
+  res.redirect(`http://localhost:3000/select-role?token=${token}`);
 });
 
 
-// Get current user info
-router.get('/user', (req, res) => {
-  if (!req.user) return res.status(401).json({ error: 'Not logged in' });
-  res.json(req.user);
-});
+// Set role after login
+const { verifyJWT } = require('../middleware/auth'); // or wherever you keep this
 
-// Set user role
-// POST /api/auth/set-role
 router.post('/set-role', async (req, res) => {
-  if (!req.isAuthenticated()) {
-    return res.status(401).json({ error: 'Not authenticated' });
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ error: 'No token provided' });
+  }
+
+  const token = authHeader.split(" ")[1];
+  let decoded;
+  try {
+    decoded = jwt.verify(token, process.env.JWT_SECRET);
+  } catch (err) {
+    return res.status(401).json({ error: 'Invalid token' });
   }
 
   const { role } = req.body;
-
-  // Optional: validate role
-  const validRoles = ['admin', 'hr', 'candidate'];
+  const validRoles = ['admin', 'hr', 'candidate', 'employee'];
   if (!validRoles.includes(role)) {
     return res.status(400).json({ error: 'Invalid role' });
   }
 
-  // Update user in DB
-  req.user.role = role;
-  await req.user.save();
+  const user = await User.findById(decoded.id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
 
-  res.status(200).json({ message: 'Role set successfully', user: req.user });
+  user.role = role;
+  await user.save();
+
+  const newToken = jwt.sign(
+    {
+      id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+    },
+    process.env.JWT_SECRET,
+    { expiresIn: '7d' }
+  );
+
+  res.status(200).json({ message: 'Role set successfully', token: newToken });
 });
 
-// Final redirection based on role
-router.get('/redirect', (req, res) => {
-  if (!req.user || !req.user.role) return res.redirect('/select-role');
 
-  const role = req.user.role;
-  if (role === 'admin') return res.redirect('/admin');
-  if (role === 'hr') return res.redirect('/hr');
-  if (role === 'candidate') return res.redirect('/candidate');
-  if(role=='employee') return res.redirect('/employee');
 
-  res.redirect('/select-role');
-});
-// Get current logged-in user
-// Use this instead
+// Utility to get user from token
 router.get('/me', (req, res) => {
-  if (!req.user) return res.status(401).json({ error: 'Not logged in' });
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith("Bearer ")) {
+    return res.status(401).json({ error: 'No token provided' });
+  }
 
-  const { _id, name, email, role } = req.user;
-  res.json({ _id, name, email, role });
+  try {
+    const token = authHeader.split(" ")[1];
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    res.status(200).json(decoded);
+  } catch (err) {
+    res.status(401).json({ error: 'Invalid token' });
+  }
 });
-
-  router.get('/logout', (req, res) => {
-    req.logout((err) => {
-      if (err) return res.status(500).send("Logout error");
-      req.session.destroy(() => {
-        res.clearCookie('connect.sid');
-        res.send('Logged out');
-      });
-    });
-  });
-  
 
 module.exports = router;
