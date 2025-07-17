@@ -59,11 +59,6 @@ router.post('/set-role', async (req, res) => {
     const user = await User.findById(decoded.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    // 🚫 Prevent changing role if already set
-    if (user.role) {
-      return res.status(400).json({ error: 'Role already set and cannot be changed' });
-    }
-
     user.role = role;
     await user.save();
 
