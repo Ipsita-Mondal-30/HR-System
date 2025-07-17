@@ -38,36 +38,6 @@ app.use((req, res, next) => {
 // Middlewares
 app.use(express.json());
 
-// Auth Routes
-app.get('/auth/google',
-  passport.authenticate('google', { scope: ['profile', 'email'] }));
-
-  app.get('/auth/google/callback',
-    passport.authenticate('google', {
-      failureRedirect: '/login',
-      session: true
-    }),
-    (req, res) => {
-      // 👤 User is now authenticated
-      const user = req.user;
-  
-      // 🔄 Redirect based on role
-      if (!user.role) {
-        return res.redirect('http://localhost:3000/select-role');
-      }
-  
-      if (user.role === 'admin') {
-        return res.redirect('http://localhost:3000/admin/dashboard');
-      } else if (user.role === 'hr') {
-        return res.redirect('http://localhost:3000/hr/dashboard');
-      } else if (user.role === 'candidate') {
-        return res.redirect('http://localhost:3000/jobs');
-      } else {
-        // 🚨 Fallback (just in case)
-        return res.redirect('http://localhost:3000');
-      }
-    }
-  );
   
 app.get('/me', (req, res) => {
     if (req.isAuthenticated()) {
