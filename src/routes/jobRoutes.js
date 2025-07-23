@@ -3,18 +3,19 @@ const {
   createJob,
   getJobs,
   getJobById,
-  updateJob // ✅ import this
+  updateJob,
 } = require('../controllers/jobController');
-const { isHR } = require('../middleware/auth');
+const { verifyJWT, isHR } = require('../middleware/auth');
 
 const router = express.Router();
 
+// Protected routes
+router.post('/', verifyJWT, isHR, createJob);
+router.put('/:id', verifyJWT, isHR, updateJob);
 
-router.post('/', isHR, createJob);
+// Public routes
 router.get('/', getJobs);
 router.get('/:id', getJobById);
-router.put('/:id', isHR, updateJob); // ✅ add this route
 
 console.log('📦 jobRoutes loaded');
-
 module.exports = router;
