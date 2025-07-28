@@ -12,20 +12,30 @@ router.get('/google', passport.authenticate('google', {
 // --- Google OAuth callback ---
 router.get('/google/callback', passport.authenticate('google', { session: false }), (req, res) => {
   const user = req.user;
-
+  console.log('🔐 OAuth callback - User data:', user);
+  
   const token = jwt.sign(
     {
-      id: user._id,
+      _id: user._id, // ✅ not "id"
       name: user.name,
       email: user.email,
-      role: user.role || null, // Initially null for new users
+      role: user.role,
     },
     process.env.JWT_SECRET,
     { expiresIn: '7d' }
   );
+  
 
   // 🛑 DEBUGGING TIP: Log token here if you suspect redirect issues
-  // console.log('Generated JWT:', token);
+  console.log('Generated JWT:', token);
+
+  // Set cookie with token
+  res.cookie('auth_token', token, {
+    httpOnly: false, // Allow client-side access
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+  });
 
   // ⚠️ Ensure the frontend handles this redirect properly (with token in URL)
   res.redirect(`http://localhost:3000/auth/callback?token=${token}`);
@@ -34,12 +44,17 @@ router.get('/google/callback', passport.authenticate('google', { session: false 
 
 // --- Set role after user selects a role ---
 router.post('/set-role', async (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'No token provided' });
+  // Check for token in cookies first, then Authorization header
+  let token = req.cookies.auth_token;
+  
+  if (!token) {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'No token provided' });
+    }
+    token = authHeader.split(' ')[1];
   }
 
-  const token = authHeader.split(' ')[1];
   let decoded;
 
   try {
@@ -56,7 +71,7 @@ router.post('/set-role', async (req, res) => {
   }
 
   try {
-    const user = await User.findById(decoded.id);
+    const user = await User.findById(decoded._id || decoded.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     user.role = role;
@@ -64,7 +79,7 @@ router.post('/set-role', async (req, res) => {
 
     const newToken = jwt.sign(
       {
-        id: user._id,
+        _id: user._id,
         name: user.name,
         email: user.email,
         role: user.role,
@@ -73,11 +88,19 @@ router.post('/set-role', async (req, res) => {
       { expiresIn: '7d' }
     );
 
+    // Set new cookie with updated token
+    res.cookie('auth_token', newToken, {
+      httpOnly: false,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    });
+
     res.status(200).json({
       message: 'Role set successfully',
       token: newToken,
       user: {
-        id: user._id,
+        _id: user._id,
         name: user.name,
         email: user.email,
         role: user.role,
@@ -91,18 +114,29 @@ router.post('/set-role', async (req, res) => {
 
 // --- Utility: Get logged-in user's info from JWT ---
 router.get('/me', (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'No token provided' });
+  // Check for token in cookies first, then Authorization header
+  let token = req.cookies.auth_token;
+  
+  if (!token) {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'No token provided' });
+    }
+    token = authHeader.split(' ')[1];
   }
 
   try {
-    const token = authHeader.split(' ')[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     res.status(200).json(decoded);
   } catch (err) {
     res.status(401).json({ error: 'Invalid token' });
   }
+});
+
+// --- Logout route ---
+router.post('/logout', (req, res) => {
+  res.clearCookie('auth_token');
+  res.status(200).json({ message: 'Logged out successfully' });
 });
 
 module.exports = router;

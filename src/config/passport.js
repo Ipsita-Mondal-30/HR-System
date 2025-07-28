@@ -10,6 +10,13 @@ passport.use(new GoogleStrategy({
 },
 async (accessToken, refreshToken, profile, done) => {
   try {
+    console.log('🔐 Google OAuth Profile:', {
+      id: profile.id,
+      displayName: profile.displayName,
+      emails: profile.emails,
+      name: profile.name
+    });
+
     let user = await User.findOne({ googleId: profile.id });
 
     if (!user) {
@@ -20,17 +27,26 @@ async (accessToken, refreshToken, profile, done) => {
         user.googleId = profile.id;
         await user.save();
       } else if (!user) {
+        // Use displayName or fallback to email prefix
+        const userName = profile.displayName || 
+                       (profile.name && profile.name.givenName + ' ' + profile.name.familyName) ||
+                       profile.emails[0].value.split('@')[0];
+
+        console.log('🔐 Creating new user with name:', userName);
+
         user = await User.create({
           googleId: profile.id,
-          name: profile.displayName,
+          name: userName,
           email: profile.emails[0].value,
           role: null, // Let user select after login
         });
       }
     }
 
+    console.log('🔐 User found/created:', user);
     return done(null, user);
   } catch (err) {
+    console.error('❌ Passport error:', err);
     return done(err, null);
   }
 }));

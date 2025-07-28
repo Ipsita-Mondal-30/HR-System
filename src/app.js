@@ -4,6 +4,7 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const expressSession = require('express-session');
 const passport = require('passport');
+const cookieParser = require('cookie-parser');
 
 dotenv.config(); // ✅ Load env
 
@@ -15,6 +16,9 @@ const employeeRoutes = require('./routes/employeeRoutes');
 
 const app = express(); // ✅ MUST come before app.use()
 
+// Cookie parser middleware
+app.use(cookieParser());
+
 // Session + Passport Setup
 app.use(expressSession({
   secret: process.env.SESSION_SECRET,
@@ -25,9 +29,11 @@ app.use(passport.initialize());
 app.use(passport.session());
 
 app.use(cors({
-    origin: 'http://localhost:3000', // your frontend
-    credentials: true               // allow cookies
-  }));
+  origin: 'http://localhost:3000',
+  credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  exposedHeaders: ['Authorization']
+}));
 
 // Debug logger
 app.use((req, res, next) => {
@@ -48,7 +54,7 @@ app.get('/me', (req, res) => {
   });
 
   const authRoutes = require('./routes/authRoutes');
-  app.use('/api/auth', authRoutes);
+  app.use('/api/auth/', authRoutes);
   
 
   
