@@ -6,6 +6,12 @@ const userSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
   role: { type: String, enum: ['admin', 'hr', 'candidate', 'employee'], default: null },
   
+  // Admin fields
+  isActive: { type: Boolean, default: true },
+  isVerified: { type: Boolean, default: false },
+  verificationNotes: String,
+  lastLogin: Date,
+  
   // Candidate-specific fields
   phone: String,
   location: String,
@@ -18,6 +24,14 @@ const userSchema = new mongoose.Schema({
   linkedIn: String,
   github: String,
   profilePicture: String,
+  
+  // HR-specific fields
+  company: String,
+  position: String,
+  website: String,
+  companySize: String,
+  industry: String,
+  verificationDocuments: [String],
   
   // Saved jobs for candidates
   savedJobs: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Job' }],
@@ -35,5 +49,11 @@ userSchema.pre('save', function(next) {
   this.updatedAt = Date.now();
   next();
 });
+
+// Update lastLogin when user logs in
+userSchema.methods.updateLastLogin = function() {
+  this.lastLogin = new Date();
+  return this.save();
+};
 
 module.exports = mongoose.model('User', userSchema);

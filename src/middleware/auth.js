@@ -34,8 +34,19 @@ exports.verifyJWT = (req, res, next) => {
 // Role checks (after verifyJWT)
 exports.isHR = (req, res, next) => {
   console.log('🔍 Checking HR role. User role:', req.user?.role);
-  if (req.user?.role === 'hr') return next();
-  res.status(403).json({ message: "HRs only" });
+  console.log('🔍 User details:', { 
+    id: req.user?._id, 
+    email: req.user?.email, 
+    role: req.user?.role 
+  });
+  
+  if (req.user?.role === 'hr' || req.user?.role === 'admin') {
+    console.log('✅ HR/Admin access granted');
+    return next();
+  }
+  
+  console.log('❌ HR access denied');
+  res.status(403).json({ message: "HR or Admin access required" });
 };
 
 exports.isAdmin = (req, res, next) => {

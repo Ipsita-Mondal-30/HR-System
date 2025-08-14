@@ -80,8 +80,22 @@ const getJobs = async (req, res) => {
       status = 'open'
     } = req.query;
 
-    // Build filter object
-    let filter = { status };
+    // Build filter object - handle both 'open' and 'active' statuses
+    let filter = {};
+    
+    // If no status specified, show active jobs (for public view)
+    // If status is specified, use it
+    if (status) {
+      if (status === 'open') {
+        // Map 'open' to 'active' for compatibility
+        filter.status = { $in: ['active', 'open'] };
+      } else {
+        filter.status = status;
+      }
+    } else {
+      // Default: show active jobs
+      filter.status = { $in: ['active', 'open'] };
+    }
 
     // Keyword search (title, description, skills, tags)
     if (keyword) {

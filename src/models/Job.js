@@ -22,14 +22,56 @@ const jobSchema = new mongoose.Schema({
     ref: "User",
     required: true
   },
-  status: { type: String, enum: ["open", "closed"], default: "open" },
+  status: { 
+    type: String, 
+    enum: ["active", "inactive", "pending", "rejected", "open", "closed"], 
+    default: "active" 
+  },
+  isApproved: { type: Boolean, default: true },
+  rejectionReason: String,
+  type: String, // For admin interface compatibility
+  salary: {
+    min: Number,
+    max: Number,
+    currency: { type: String, default: 'USD' }
+  },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
+});
+
+// Virtual for salary object (for admin interface compatibility)
+jobSchema.virtual('salaryRange').get(function() {
+  if (this.minSalary || this.maxSalary) {
+    return {
+      min: this.minSalary,
+      max: this.maxSalary,
+      currency: 'USD'
+    };
+  }
+  return this.salary;
 });
 
 // Update the updatedAt field before saving
 jobSchema.pre('save', function(next) {
   this.updatedAt = Date.now();
+  
+  // Sync salary fields
+  if (this.salary && (this.salary.min || this.salary.max)) {
+    this.minSalary = this.salary.min;
+    this.maxSalary = this.salary.max;
+  } else if (this.minSalary || this.maxSalary) {
+    this.salary = {
+      min: this.minSalary,
+      max: this.maxSalary,
+      currency: 'USD'
+    };
+  }
+  
+  // Set type for admin compatibility
+  if (!this.type && this.employmentType) {
+    this.type = this.employmentType;
+  }
+  
   next();
 });
 

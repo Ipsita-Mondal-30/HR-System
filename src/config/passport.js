@@ -25,6 +25,7 @@ async (accessToken, refreshToken, profile, done) => {
 
       if (user && !user.googleId) {
         user.googleId = profile.id;
+        user.lastLogin = new Date();
         await user.save();
       } else if (!user) {
         // Use displayName or fallback to email prefix
@@ -39,8 +40,15 @@ async (accessToken, refreshToken, profile, done) => {
           name: userName,
           email: profile.emails[0].value,
           role: null, // Let user select after login
+          lastLogin: new Date(),
+          isActive: true,
+          isVerified: false
         });
       }
+    } else {
+      // Update last login for existing user
+      user.lastLogin = new Date();
+      await user.save();
     }
 
     console.log('🔐 User found/created:', user);

@@ -7,32 +7,81 @@ const Role = require('../models/Role');
 
 const getAdminStats = async (req, res) => {
   try {
-    const [jobsCount, applicationsCount, hrCount, candidateCount, departmentsCount, rolesCount, matchStats] =
-      await Promise.all([
-        Job.countDocuments(),
-        Application.countDocuments(),
-        User.countDocuments({ role: 'hr' }),
-        User.countDocuments({ role: 'candidate' }),
-        Department.countDocuments(),
-        Role.countDocuments(),
-        Application.aggregate([
-          { $group: { _id: null, avgScore: { $avg: "$matchScore" } } }
-        ])
-      ]);
+    console.log('📊 Fetching real admin statistics from MongoDB...');
+    
+    const [
+      totalUsers,
+      jobsCount, 
+      applicationsCount, 
+      hrCount, 
+      candidateCount, 
+      departmentsCount, 
+      rolesCount,
+      activeJobs,
+      pendingApplications,
+      pendingHRVerifications,
+      matchStats,
+      recentCandidates,
+      recentHRs,
+      recentJobs,
+      recentApplications
+    ] = await Promise.all([
+      User.countDocuments(),
+      Job.countDocuments(),
+      Application.countDocuments(),
+      User.countDocuments({ role: 'hr' }),
+      User.countDocuments({ role: 'candidate' }),
+      Department.countDocuments(),
+      Role.countDocuments(),
+      Job.countDocuments({ status: 'active' }),
+      Application.countDocuments({ status: 'pending' }),
+      User.countDocuments({ role: 'hr', isVerified: false }),
+      Application.aggregate([
+        { $match: { matchScore: { $exists: true, $ne: null } } },
+        { $group: { _id: null, avgScore: { $avg: "$matchScore" } } }
+      ]),
+      User.countDocuments({ 
+        role: 'candidate', 
+        createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } 
+      }),
+      User.countDocuments({ 
+        role: 'hr', 
+        createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } 
+      }),
+      Job.countDocuments({ 
+        createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } 
+      }),
+      Application.countDocuments({ 
+        createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } 
+      })
+    ]);
 
     const avgMatchScore = matchStats[0]?.avgScore || 0;
 
-    res.json({
+    const stats = {
+      totalUsers,
       jobsCount,
       applicationsCount,
       hrCount,
       candidateCount,
       departmentsCount,
       rolesCount,
-      avgMatchScore: avgMatchScore.toFixed(2)
-    });
+      activeJobs,
+      pendingApplications,
+      pendingHRVerifications,
+      avgMatchScore: Number(avgMatchScore.toFixed(1)),
+      recentActivity: {
+        newCandidates: recentCandidates,
+        newHRs: recentHRs,
+        newJobs: recentJobs,
+        newApplications: recentApplications
+      }
+    };
+
+    console.log('📊 Real admin stats fetched:', stats);
+    res.json(stats);
   } catch (err) {
-    console.error("Error fetching admin stats:", err);
+    console.error("❌ Error fetching admin stats:", err);
     res.status(500).json({ error: "Error fetching admin statistics" });
   }
 };
