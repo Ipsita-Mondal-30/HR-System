@@ -35,14 +35,14 @@ app.use(cors({
   exposedHeaders: ['Authorization']
 }));
 
+// Middlewares
+app.use(express.json());
+
 // Debug logger
 app.use((req, res, next) => {
   console.log(`🛰️ Incoming Request: ${req.method} ${req.url}`);
   next();
 });
-
-// Middlewares
-app.use(express.json());
 
   
 app.get('/me', (req, res) => {
@@ -81,17 +81,15 @@ app.use('/api/interviews', interviewRoutes);
 
 app.use('/api/admin', require('./routes/adminRoutes'));
 app.use('/api/users', require('./routes/userRoutes'));
+app.use('/api/candidate', require('./routes/candidateRoutes'));
+app.use('/api/hr', require('./routes/hrRoutes'));
 
 const adminRoutes = require('./routes/adminRoutes');
 app.use('/api/admin', adminRoutes);
 
 
 
-app.use((req, res, next) => {
-    console.log(`🛰️ Incoming Request: ${req.method} ${req.url}`);
-    console.log("📦 Body:", JSON.stringify(req.body));
-    next();
-  });
+
   
   
 
@@ -114,6 +112,71 @@ app.get('/api/me', (req, res) => {
 app.use('/api/employees', employeeRoutes);
 
 app.get('/health', (req, res) => res.send('API is running 🚀'));
+app.get('/api/test', (req, res) => res.json({ message: 'Backend is working!', port: PORT }));
+
+// Debug endpoint to check database data
+app.get('/api/debug/data', async (req, res) => {
+  try {
+    const Job = require('./models/Job');
+    const Application = require('./models/Application');
+    const User = require('./models/User');
+    
+    const [jobs, applications, users] = await Promise.all([
+      Job.find().limit(5),
+      Application.find().limit(5),
+      User.find().limit(5)
+    ]);
+    
+    res.json({
+      jobsCount: await Job.countDocuments(),
+      applicationsCount: await Application.countDocuments(),
+      usersCount: await User.countDocuments(),
+      sampleJobs: jobs,
+      sampleApplications: applications,
+      sampleUsers: users.map(u => ({ _id: u._id, name: u.name, email: u.email, role: u.role }))
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Seed database endpoint
+app.post('/api/debug/seed', async (req, res) => {
+  try {
+    const seedData = require('./utils/seedData');
+    await seedData();
+    res.json({ message: 'Database seeded successfully!' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Debug applications endpoint
+app.get('/api/debug/applications', async (req, res) => {
+  try {
+    const Application = require('./models/Application');
+    const applications = await Application.find()
+      .populate('job', 'title')
+      .populate('candidate', 'name email')
+      .sort({ createdAt: -1 });
+    
+    res.json({
+      count: applications.length,
+      applications: applications.map(app => ({
+        _id: app._id,
+        name: app.name,
+        email: app.email,
+        jobTitle: app.job?.title,
+        candidateName: app.candidate?.name,
+        candidateEmail: app.candidate?.email,
+        status: app.status,
+        createdAt: app.createdAt
+      }))
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // Connect DB and Start Server
 const PORT = process.env.PORT || 8080;
@@ -132,7 +195,30 @@ app.use((req, res, next) => {
   next();
 });
   
-mongoose
-  .connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
-  .then(() => app.listen(PORT, () => console.log(`Server running on port ${PORT}`)))
-  .catch((err) => console.log(err));
+// Import and use the proper DB connection
+const connectDB = async () => {
+  try {
+    await mongoose.connect(process.env.MONGODB_URI + '/hrsystem', {
+      useNewUrlParser: true,
+      useUnifiedTopology: true
+    });
+    console.log('✅ Connected to MongoDB');
+  } catch (err) {
+    console.error('❌ Error connecting to MongoDB:', err);
+    throw err;
+  }
+};
+
+// Connect to database and start server
+connectDB()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+      console.log(`🌐 Frontend URL: http://localhost:3000`);
+      console.log(`🔗 Backend URL: http://localhost:${PORT}`);
+    });
+  })
+  .catch((err) => {
+    console.error('Failed to start server:', err);
+    process.exit(1);
+  });

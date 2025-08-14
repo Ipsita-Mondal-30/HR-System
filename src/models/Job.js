@@ -22,7 +22,15 @@ const jobSchema = new mongoose.Schema({
     ref: "User",
     required: true
   },
-  createdAt: { type: Date, default: Date.now }
+  status: { type: String, enum: ["open", "closed"], default: "open" },
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now }
+});
+
+// Update the updatedAt field before saving
+jobSchema.pre('save', function(next) {
+  this.updatedAt = Date.now();
+  next();
 });
 
 module.exports = mongoose.model("Job", jobSchema);

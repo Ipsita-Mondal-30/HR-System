@@ -22,6 +22,9 @@ router.get('/job/:jobId', applicationController.getApplicationsByJob);
 router.put('/:id/status', applicationController.updateApplicationStatus);
 router.put('/:id/status', isHRorAdmin, applicationController.updateStatus);
 
+// PUT route to update HR notes
+router.put('/:id/notes', isHRorAdmin, applicationController.updateNotes);
+
 
 
 router.get('/my', isCandidate, applicationController.getMyApplications);

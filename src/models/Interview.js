@@ -7,29 +7,78 @@ const interviewSchema = new mongoose.Schema({
     required: true
   },
   interviewer: {
-    type: String, // ✅ Changed from ObjectId to String
-    required: true,
-  },
-  candidateEmail: {
-    type: String,
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
     required: true
   },
   scheduledAt: {
     type: Date,
     required: true
   },
+  duration: {
+    type: Number,
+    default: 60 // minutes
+  },
+  type: {
+    type: String,
+    enum: ['phone', 'video', 'in-person'],
+    default: 'video'
+  },
   status: {
     type: String,
-    enum: ['scheduled', 'completed', 'cancelled'],
+    enum: ['scheduled', 'completed', 'cancelled', 'no-show'],
     default: 'scheduled'
   },
+  meetingLink: String,
+  location: String,
+  notes: String,
   scorecard: {
-    strengths: String,
-    weaknesses: String,
-    overallScore: Number,
-    notes: String,
-    generatedQuestions: [String],
+    technicalSkills: {
+      type: Number,
+      min: 0,
+      max: 5
+    },
+    communication: {
+      type: Number,
+      min: 0,
+      max: 5
+    },
+    problemSolving: {
+      type: Number,
+      min: 0,
+      max: 5
+    },
+    culturalFit: {
+      type: Number,
+      min: 0,
+      max: 5
+    },
+    overall: {
+      type: Number,
+      min: 0,
+      max: 5
+    },
+    feedback: String,
+    recommendation: {
+      type: String,
+      enum: ['hire', 'no-hire', 'maybe'],
+      default: 'maybe'
+    }
   },
-}, { timestamps: true });
+  createdAt: {
+    type: Date,
+    default: Date.now
+  },
+  updatedAt: {
+    type: Date,
+    default: Date.now
+  }
+});
+
+// Update the updatedAt field before saving
+interviewSchema.pre('save', function(next) {
+  this.updatedAt = Date.now();
+  next();
+});
 
 module.exports = mongoose.model('Interview', interviewSchema);

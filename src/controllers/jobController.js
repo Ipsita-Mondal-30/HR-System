@@ -64,15 +64,91 @@ const createJob = async (req, res) => {
   }
 };
 
-// ✅ GET ALL JOBS
+// ✅ GET ALL JOBS with filtering and search
 const getJobs = async (req, res) => {
   try {
-    const jobs = await Job.find()
+    const {
+      keyword,
+      role,
+      employmentType,
+      location,
+      companyName,
+      companySize,
+      experience,
+      minSalary,
+      remote,
+      status = 'open'
+    } = req.query;
+
+    // Build filter object
+    let filter = { status };
+
+    // Keyword search (title, description, skills, tags)
+    if (keyword) {
+      filter.$or = [
+        { title: { $regex: keyword, $options: 'i' } },
+        { description: { $regex: keyword, $options: 'i' } },
+        { skills: { $in: [new RegExp(keyword, 'i')] } },
+        { tags: { $in: [new RegExp(keyword, 'i')] } }
+      ];
+    }
+
+    // Employment type filter
+    if (employmentType) {
+      filter.employmentType = employmentType;
+    }
+
+    // Location filter
+    if (location) {
+      filter.location = { $regex: location, $options: 'i' };
+    }
+
+    // Company name filter
+    if (companyName) {
+      filter.companyName = { $regex: companyName, $options: 'i' };
+    }
+
+    // Company size filter
+    if (companySize) {
+      filter.companySize = companySize;
+    }
+
+    // Experience filter (less than or equal to specified years)
+    if (experience) {
+      filter.experienceRequired = { $lte: parseInt(experience) };
+    }
+
+    // Minimum salary filter
+    if (minSalary) {
+      filter.minSalary = { $gte: parseInt(minSalary) };
+    }
+
+    // Remote filter
+    if (remote === 'true') {
+      filter.remote = true;
+    } else if (remote === 'false') {
+      filter.remote = false;
+    }
+
+    console.log('🔍 Job search filter:', filter);
+
+    const jobs = await Job.find(filter)
       .populate('department', 'name')
       .populate('role', 'title')
-      .populate('createdBy', 'name email');
-    res.json(jobs);
+      .populate('createdBy', 'name email')
+      .sort({ createdAt: -1 });
+
+    // If role filter is specified, filter by populated role title
+    let filteredJobs = jobs;
+    if (role) {
+      filteredJobs = jobs.filter(job => 
+        job.role && job.role.title.toLowerCase().includes(role.toLowerCase())
+      );
+    }
+
+    res.json(filteredJobs);
   } catch (err) {
+    console.error('Error fetching jobs:', err);
     res.status(500).json({ error: 'Failed to fetch jobs' });
   }
 };

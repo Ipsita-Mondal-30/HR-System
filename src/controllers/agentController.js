@@ -90,12 +90,24 @@ Respond in the format:
       temperature: 0.3,
     });
 
-  // Remove code block markers if present
-  let jsonText = cohereResponse.text.trim();
-  if (jsonText.startsWith('```')) {
-    jsonText = jsonText.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
-  }
-  const parsed = JSON.parse(jsonText); // Now safe to parse
+    // Parse Cohere response
+    let parsed;
+    try {
+      // Remove code block markers if present
+      let jsonText = cohereResponse.text.trim();
+      if (jsonText.startsWith('```')) {
+        jsonText = jsonText.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+      }
+      parsed = JSON.parse(jsonText);
+    } catch (parseError) {
+      console.error('Error parsing Cohere response:', parseError);
+      // Fallback to default values
+      parsed = {
+        matchScore: keywordScore,
+        explanation: "AI analysis completed based on keyword matching.",
+        tags: matchingSkills.slice(0, 3)
+      };
+    }
 
 
     const finalScore = Math.round((keywordScore + parsed.matchScore) / 2);

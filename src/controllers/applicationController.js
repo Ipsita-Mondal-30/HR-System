@@ -141,8 +141,23 @@ exports.updateApplicationStatus = async (req, res) => {
   // Get applications for the logged-in candidate
 exports.getMyApplications = async (req, res) => {
     try {
-      const email = req.user.email; // fetched from auth middleware
-      const applications = await Application.find({ email }).populate('job');
+      const userId = req.user._id;
+      const userEmail = req.user.email;
+      
+      console.log('🔍 Fetching applications for user:', { userId, userEmail });
+      
+      // Find applications by both candidate ID and email to cover all cases
+      const applications = await Application.find({
+        $or: [
+          { candidate: userId },
+          { email: userEmail }
+        ]
+      })
+      .populate('job', 'title companyName department location')
+      .populate('candidate', 'name email')
+      .sort({ createdAt: -1 });
+      
+      console.log('📋 Found applications:', applications.length);
       res.json(applications);
     } catch (error) {
       console.error("Error fetching candidate's applications:", error);
@@ -152,6 +167,29 @@ exports.getMyApplications = async (req, res) => {
   
   
   
+// Update HR notes for an application
+exports.updateNotes = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { notes } = req.body;
+
+    const application = await Application.findByIdAndUpdate(
+      id,
+      { hrNotes: notes },
+      { new: true }
+    );
+
+    if (!application) {
+      return res.status(404).json({ error: 'Application not found' });
+    }
+
+    res.json({ message: 'Notes updated successfully', application });
+  } catch (err) {
+    console.error('Error updating notes:', err);
+    res.status(500).json({ error: 'Failed to update notes' });
+  }
+};
+
 // 🔍 View applications (optional filter by job)
 exports.getApplications = async (req, res) => {
   try {
@@ -161,7 +199,8 @@ exports.getApplications = async (req, res) => {
     }
 
     const applications = await Application.find(filter)
-    .populate('job', 'title')
+    .populate('job', 'title companyName department')
+    .populate('candidate', 'name email skills experience')
     .sort({ matchScore: -1, createdAt: -1 }); // NEW: sort by score first
   
 

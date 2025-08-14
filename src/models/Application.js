@@ -31,6 +31,15 @@ const applicationSchema = new mongoose.Schema({
     default: 'pending',
   },
   resumeText: String,
+  coverLetter: String,
+  applicationData: {
+    linkedIn: String,
+    github: String,
+    expectedSalary: String,
+    availableStartDate: String,
+    whyInterested: String
+  },
+  hrNotes: String,
   createdAt: { type: Date, default: Date.now }
 });
 

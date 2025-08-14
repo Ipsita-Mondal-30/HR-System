@@ -37,8 +37,27 @@ router.get('/google/callback', passport.authenticate('google', { session: false 
     maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
   });
 
-  // ⚠️ Ensure the frontend handles this redirect properly (with token in URL)
-  res.redirect(`http://localhost:3000/auth/callback?token=${token}`);
+  // Direct redirect based on role to avoid callback page issues
+  if (!user.role) {
+    res.redirect(`http://localhost:3000/role-select?token=${token}`);
+  } else {
+    switch (user.role) {
+      case 'admin':
+        res.redirect(`http://localhost:3000/admin/dashboard?token=${token}`);
+        break;
+      case 'hr':
+        res.redirect(`http://localhost:3000/hr/dashboard?token=${token}`);
+        break;
+      case 'candidate':
+        res.redirect(`http://localhost:3000/candidate/dashboard?token=${token}`);
+        break;
+      case 'employee':
+        res.redirect(`http://localhost:3000/employee/dashboard?token=${token}`);
+        break;
+      default:
+        res.redirect(`http://localhost:3000/?token=${token}`);
+    }
+  }
 });
 
 
