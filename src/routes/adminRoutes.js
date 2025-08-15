@@ -13,6 +13,68 @@ const Role = require('../models/Role');
 router.get('/stats', verifyJWT, isHRorAdmin, getAdminStats);
 router.get('/dashboard', verifyJWT, isHRorAdmin, adminController.getHRDashboardData);
 
+// New admin endpoints
+router.get('/candidates', verifyJWT, isHRorAdmin, adminController.getCandidates);
+router.get('/hr-users', verifyJWT, isHRorAdmin, adminController.getHRUsers);
+router.get('/interviews', verifyJWT, isHRorAdmin, adminController.getInterviews);
+router.put('/users/:userId/verify-hr', verifyJWT, isHRorAdmin, adminController.verifyHR);
+
+// Job approval endpoints
+router.put('/jobs/:jobId/approve', verifyJWT, isHRorAdmin, async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const { action, reason } = req.body; // 'approve' or 'reject'
+
+    console.log(`📊 ${action === 'approve' ? 'Approving' : 'Rejecting'} job:`, jobId);
+
+    const job = await Job.findById(jobId);
+    if (!job) {
+      return res.status(404).json({ error: 'Job not found' });
+    }
+
+    if (action === 'approve') {
+      job.status = 'active';
+      job.isApproved = true;
+    } else if (action === 'reject') {
+      job.status = 'rejected';
+      job.isApproved = false;
+      job.rejectionReason = reason;
+    }
+
+    await job.save();
+
+    console.log(`✅ Job ${action}d successfully:`, job.title);
+    res.json({ 
+      message: `Job ${action}d successfully`, 
+      job: {
+        _id: job._id,
+        title: job.title,
+        status: job.status,
+        isApproved: job.isApproved,
+        rejectionReason: job.rejectionReason
+      }
+    });
+  } catch (err) {
+    console.error('❌ Error updating job approval:', err);
+    res.status(500).json({ error: 'Error updating job approval' });
+  }
+});
+
+router.get('/jobs/pending', verifyJWT, isHRorAdmin, async (req, res) => {
+  try {
+    const pendingJobs = await Job.find({ status: 'pending' })
+      .populate('createdBy', 'name email companyName')
+      .populate('department', 'name')
+      .sort({ createdAt: -1 });
+
+    console.log(`📊 Found ${pendingJobs.length} pending job approvals`);
+    res.json(pendingJobs);
+  } catch (err) {
+    console.error('❌ Error fetching pending jobs:', err);
+    res.status(500).json({ error: 'Error fetching pending jobs' });
+  }
+});
+
 // User management routes - Get all users
 router.get('/users', verifyJWT, isHRorAdmin, async (req, res) => {
     try {
@@ -156,67 +218,53 @@ router.get('/jobs', verifyJWT, isHRorAdmin, async (req, res) => {
     try {
         const { status } = req.query;
 
-        if (!isMongoConnected() && mockData) {
-            console.log('📝 Using mock data for jobs');
-            let jobs = mockData.jobs.map(job => ({
-                ...job,
-                department: { name: 'Engineering' },
-                role: { title: 'Software Engineer' },
-                postedBy: { name: 'HR Manager', email: 'hr@company.com' },
-                applicationsCount: job.applicationsCount || 0
-            }));
 
-            if (status && status !== 'all') {
-                jobs = jobs.filter(job => job.status === status);
-            }
-
-            return res.json(jobs);
-        }
 
         let filter = {};
         if (status && status !== 'all') {
             filter.status = status;
         }
 
+        console.log('📊 Fetching jobs from database...');
         const jobs = await Job.find(filter)
             .populate('department', 'name')
             .populate('role', 'title')
-            .populate('createdBy', 'name email')
+            .populate('createdBy', 'name email companyName')
             .sort({ createdAt: -1 });
+
+        console.log(`📊 Found ${jobs.length} jobs in database`);
 
         // Add application count for each job
         const jobsWithCounts = await Promise.all(
             jobs.map(async (job) => {
                 const applicationsCount = await Application.countDocuments({ job: job._id });
+                const jobObj = job.toObject();
+                
                 return {
-                    ...job.toObject(),
+                    ...jobObj,
                     applicationsCount,
-                    postedBy: job.createdBy
+                    postedBy: {
+                        name: job.createdBy?.name || 'Unknown',
+                        email: job.createdBy?.email || 'Unknown',
+                        companyName: job.createdBy?.companyName || job.companyName
+                    },
+                    // Ensure salary object exists for frontend
+                    salary: jobObj.salary || (jobObj.minSalary || jobObj.maxSalary ? {
+                        min: jobObj.minSalary,
+                        max: jobObj.maxSalary,
+                        currency: 'USD'
+                    } : null)
                 };
             })
         );
+
+        console.log(`📊 Returning ${jobsWithCounts.length} jobs with application counts`);
 
         res.json(jobsWithCounts);
     } catch (err) {
         console.error('Error fetching jobs:', err);
 
-        // Fallback to mock data on error
-        if (mockData) {
-            console.log('📝 Falling back to mock data for jobs');
-            let jobs = mockData.jobs.map(job => ({
-                ...job,
-                department: { name: 'Engineering' },
-                role: { title: 'Software Engineer' },
-                postedBy: { name: 'HR Manager', email: 'hr@company.com' },
-                applicationsCount: job.applicationsCount || 0
-            }));
-
-            if (req.query.status && req.query.status !== 'all') {
-                jobs = jobs.filter(job => job.status === req.query.status);
-            }
-
-            return res.json(jobs);
-        }
+        console.error('📝 Database error, returning empty array');
 
         res.status(500).json({ error: 'Failed to fetch jobs' });
     }
@@ -299,46 +347,16 @@ router.post('/jobs/bulk-action', verifyJWT, isHRorAdmin, async (req, res) => {
     }
 });
 
+// New Analytics and Export routes
+router.get('/analytics/comprehensive', verifyJWT, isHRorAdmin, adminController.getAnalytics);
+router.get('/export', verifyJWT, isHRorAdmin, adminController.exportData);
+
 // Analytics and reports
 router.get('/analytics', verifyJWT, isHRorAdmin, async (req, res) => {
     try {
         const { range = '30d' } = req.query;
 
-        if (!isMongoConnected() && mockData) {
-            console.log('📝 Using mock data for analytics');
-            return res.json({
-                totalUsers: mockData.users.length,
-                totalJobs: mockData.jobs.length,
-                totalApplications: mockData.applications.length,
-                activeJobs: mockData.jobs.filter(j => j.status === 'active').length,
-                activeCandidates: mockData.users.filter(u => u.role === 'candidate' && u.isActive).length,
-                activeHRs: mockData.users.filter(u => u.role === 'hr' && u.isActive).length,
-                averageMatchScore: 85,
-                conversionRate: 15,
-                monthlyGrowth: {
-                    users: 12,
-                    jobs: 8,
-                    applications: 15
-                },
-                topSkills: [
-                    { skill: 'JavaScript', count: 2 },
-                    { skill: 'React', count: 2 },
-                    { skill: 'Node.js', count: 2 },
-                    { skill: 'MongoDB', count: 1 },
-                    { skill: 'TypeScript', count: 1 }
-                ],
-                topCompanies: [
-                    { company: 'Tech Company Inc.', jobsPosted: 1, applications: 1 },
-                    { company: 'Startup Inc.', jobsPosted: 1, applications: 0 }
-                ],
-                applicationsByStatus: [
-                    { status: 'pending', count: 1 }
-                ],
-                jobsByDepartment: [
-                    { department: 'Engineering', count: 2 }
-                ]
-            });
-        }
+        // Skip mock data check, use database directly
 
         // Calculate date range
         const now = new Date();
@@ -445,39 +463,7 @@ router.get('/analytics', verifyJWT, isHRorAdmin, async (req, res) => {
     } catch (err) {
         console.error('Error fetching analytics:', err);
 
-        // Fallback to mock data on error
-        if (mockData) {
-            console.log('📝 Falling back to mock data for analytics');
-            return res.json({
-                totalUsers: mockData.users.length,
-                totalJobs: mockData.jobs.length,
-                totalApplications: mockData.applications.length,
-                activeJobs: mockData.jobs.filter(j => j.status === 'active').length,
-                activeCandidates: mockData.users.filter(u => u.role === 'candidate' && u.isActive).length,
-                activeHRs: mockData.users.filter(u => u.role === 'hr' && u.isActive).length,
-                averageMatchScore: 85,
-                conversionRate: 15,
-                monthlyGrowth: {
-                    users: 12,
-                    jobs: 8,
-                    applications: 15
-                },
-                topSkills: [
-                    { skill: 'JavaScript', count: 2 },
-                    { skill: 'React', count: 2 },
-                    { skill: 'Node.js', count: 2 }
-                ],
-                topCompanies: [
-                    { company: 'Tech Company Inc.', jobsPosted: 1, applications: 1 }
-                ],
-                applicationsByStatus: [
-                    { status: 'pending', count: 1 }
-                ],
-                jobsByDepartment: [
-                    { department: 'Engineering', count: 2 }
-                ]
-            });
-        }
+        console.error('📝 Analytics error, returning empty data');
 
         res.status(500).json({ error: 'Failed to fetch analytics' });
     }

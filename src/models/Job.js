@@ -25,9 +25,9 @@ const jobSchema = new mongoose.Schema({
   status: { 
     type: String, 
     enum: ["active", "inactive", "pending", "rejected", "open", "closed"], 
-    default: "active" 
+    default: "pending" 
   },
-  isApproved: { type: Boolean, default: true },
+  isApproved: { type: Boolean, default: false },
   rejectionReason: String,
   type: String, // For admin interface compatibility
   salary: {

@@ -21,16 +21,16 @@ router.post('/save-job', verifyJWT, isCandidate, async (req, res) => {
   try {
     const { jobId } = req.body;
     const user = await User.findById(req.user._id);
-    
+
     if (!user.savedJobs) {
       user.savedJobs = [];
     }
-    
+
     if (!user.savedJobs.includes(jobId)) {
       user.savedJobs.push(jobId);
       await user.save();
     }
-    
+
     res.json({ message: 'Job saved successfully' });
   } catch (err) {
     console.error('Error saving job:', err);
@@ -43,12 +43,12 @@ router.delete('/saved-jobs/:jobId', verifyJWT, isCandidate, async (req, res) => 
   try {
     const { jobId } = req.params;
     const user = await User.findById(req.user._id);
-    
+
     if (user.savedJobs) {
       user.savedJobs = user.savedJobs.filter(id => id.toString() !== jobId);
       await user.save();
     }
-    
+
     res.json({ message: 'Job removed from saved list' });
   } catch (err) {
     console.error('Error removing saved job:', err);
@@ -76,7 +76,7 @@ router.put('/profile', verifyJWT, isCandidate, async (req, res) => {
       { $set: updates },
       { new: true, runValidators: true }
     ).select('-password');
-    
+
     res.json(user);
   } catch (err) {
     console.error('Error updating profile:', err);
@@ -88,12 +88,12 @@ router.put('/profile', verifyJWT, isCandidate, async (req, res) => {
 router.get('/dashboard-stats', verifyJWT, isCandidate, async (req, res) => {
   try {
     const userId = req.user._id;
-    
+
     const [applications, user] = await Promise.all([
       Application.find({ candidate: userId }),
       User.findById(userId).populate('savedJobs')
     ]);
-    
+
     const stats = {
       totalApplications: applications.length,
       pendingApplications: applications.filter(app => app.status === 'pending').length,
@@ -102,7 +102,7 @@ router.get('/dashboard-stats', verifyJWT, isCandidate, async (req, res) => {
       savedJobs: user.savedJobs ? user.savedJobs.length : 0,
       profileCompleteness: calculateProfileCompleteness(user)
     };
-    
+
     res.json(stats);
   } catch (err) {
     console.error('Error fetching dashboard stats:', err);
@@ -113,7 +113,7 @@ router.get('/dashboard-stats', verifyJWT, isCandidate, async (req, res) => {
 // Apply to a job with resume upload, AI scoring and email notifications
 router.post('/apply-with-resume', verifyJWT, isCandidate, async (req, res) => {
   const upload = require('../middleware/upload');
-  
+
   // Use multer middleware for file upload
   upload.single('resume')(req, res, async (err) => {
     if (err) {
@@ -122,23 +122,23 @@ router.post('/apply-with-resume', verifyJWT, isCandidate, async (req, res) => {
     }
 
     try {
-      const { 
-        jobId, 
-        coverLetter, 
-        portfolio, 
-        linkedIn, 
-        github, 
-        expectedSalary, 
-        availableStartDate, 
+      const {
+        jobId,
+        coverLetter,
+        portfolio,
+        linkedIn,
+        github,
+        expectedSalary,
+        availableStartDate,
         whyInterested,
         phone,
         location,
         experience
       } = req.body;
-      
+
       const user = await User.findById(req.user._id);
       const Job = require('../models/Job');
-      
+
       if (!user) {
         return res.status(404).json({ error: 'User not found' });
       }
@@ -202,7 +202,7 @@ router.post('/apply-with-resume', verifyJWT, isCandidate, async (req, res) => {
       try {
         const agent = require('../controllers/agentController');
         console.log('🤖 Starting AI analysis for application:', application._id);
-        
+
         // Create a mock response object for the agent controller
         const mockRes = {
           json: (data) => {
@@ -229,7 +229,7 @@ router.post('/apply-with-resume', verifyJWT, isCandidate, async (req, res) => {
         };
 
         await agent.getMatchScore(
-          { params: { applicationId: application._id } }, 
+          { params: { applicationId: application._id } },
           mockRes
         );
       } catch (agentError) {
@@ -300,19 +300,19 @@ router.post('/apply-with-resume', verifyJWT, isCandidate, async (req, res) => {
 // Apply to a job with AI scoring and email notifications (fallback without resume)
 router.post('/apply', verifyJWT, isCandidate, async (req, res) => {
   try {
-    const { 
-      jobId, 
-      coverLetter, 
-      portfolio, 
-      linkedIn, 
-      github, 
-      expectedSalary, 
-      availableStartDate, 
-      whyInterested 
+    const {
+      jobId,
+      coverLetter,
+      portfolio,
+      linkedIn,
+      github,
+      expectedSalary,
+      availableStartDate,
+      whyInterested
     } = req.body;
     const user = await User.findById(req.user._id);
     const Job = require('../models/Job');
-    
+
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
@@ -361,8 +361,8 @@ router.post('/apply', verifyJWT, isCandidate, async (req, res) => {
     try {
       const agent = require('../controllers/agentController');
       await agent.getMatchScore(
-        { params: { applicationId: application._id } }, 
-        { 
+        { params: { applicationId: application._id } },
+        {
           json: (data) => console.log('AI scoring completed:', data),
           status: (code) => ({ json: (data) => console.log('AI scoring status:', code, data) })
         }
@@ -444,9 +444,41 @@ function calculateProfileCompleteness(user) {
     user.resumeUrl,
     user.skills && user.skills.length > 0 ? 'skills' : null
   ];
-  
+
   const completedFields = fields.filter(field => field && field.toString().trim()).length;
   return Math.round((completedFields / fields.length) * 100);
 }
+
+// Get candidate's interviews
+router.get('/interviews', verifyJWT, isCandidate, async (req, res) => {
+  try {
+    const Interview = require('../models/Interview');
+    const Application = require('../models/Application');
+
+    // Find all applications for this candidate
+    const candidateApplications = await Application.find({ candidate: req.user._id });
+    const applicationIds = candidateApplications.map(app => app._id);
+
+    // Find interviews for these applications
+    const interviews = await Interview.find({
+      application: { $in: applicationIds }
+    })
+      .populate({
+        path: 'application',
+        populate: [
+          { path: 'job', select: 'title companyName' },
+          { path: 'candidate', select: 'name email' }
+        ]
+      })
+      .populate('interviewer', 'name email')
+      .sort({ scheduledAt: -1 });
+
+    console.log(`📅 Found ${interviews.length} interviews for candidate ${req.user.email}`);
+    res.json(interviews);
+  } catch (err) {
+    console.error('Error fetching candidate interviews:', err);
+    res.status(500).json({ error: 'Failed to fetch interviews' });
+  }
+});
 
 module.exports = router;

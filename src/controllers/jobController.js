@@ -80,21 +80,24 @@ const getJobs = async (req, res) => {
       status = 'open'
     } = req.query;
 
-    // Build filter object - handle both 'open' and 'active' statuses
+    // Build filter object - only show approved jobs to candidates
     let filter = {};
     
-    // If no status specified, show active jobs (for public view)
-    // If status is specified, use it
+    // For public view, only show approved jobs with active status
     if (status) {
       if (status === 'open') {
-        // Map 'open' to 'active' for compatibility
+        // Map 'open' to 'active' for compatibility, but only approved jobs
         filter.status = { $in: ['active', 'open'] };
+        filter.isApproved = true;
       } else {
         filter.status = status;
+        // For any specific status, still only show approved jobs
+        filter.isApproved = true;
       }
     } else {
-      // Default: show active jobs
+      // Default: show only approved active jobs
       filter.status = { $in: ['active', 'open'] };
+      filter.isApproved = true;
     }
 
     // Keyword search (title, description, skills, tags)
