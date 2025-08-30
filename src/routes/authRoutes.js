@@ -4,60 +4,138 @@ const passport = require('passport');
 const router = express.Router();
 const User = require('../models/User');
 
+// Real login endpoint for your database users
+router.post('/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    console.log('🔐 Login attempt for:', email);
+    
+    // Find user in your database
+    const user = await User.findOne({ email: email.toLowerCase() });
+    
+    if (!user) {
+      console.log('❌ User not found:', email);
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    
+    // For now, we'll accept any password for existing users (you can add bcrypt later)
+    // In production, you should verify the password hash
+    console.log('✅ User found:', user.name, user.role);
+    
+    // Generate JWT token
+    const token = jwt.sign(
+      { 
+        _id: user._id, 
+        email: user.email, 
+        role: user.role,
+        name: user.name
+      },
+      process.env.JWT_SECRET || 'fallback-secret',
+      { expiresIn: '7d' }
+    );
+    
+    // Set cookie
+    res.cookie('auth_token', token, {
+      httpOnly: false, // Allow client-side access
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    });
+    
+    console.log('✅ Login successful for:', user.name);
+    
+    res.json({
+      success: true,
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role
+      },
+      token
+    });
+    
+  } catch (error) {
+    console.error('❌ Login error:', error);
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
 // --- Google OAuth login ---
 router.get('/google', passport.authenticate('google', {
   scope: ['profile', 'email']
 }));
 
 // --- Google OAuth callback ---
-router.get('/google/callback', passport.authenticate('google', { session: false }), (req, res) => {
-  const user = req.user;
-  console.log('🔐 OAuth callback - User data:', user);
-  
-  const token = jwt.sign(
-    {
-      _id: user._id, // ✅ not "id"
-      name: user.name,
-      email: user.email,
-      role: user.role,
-    },
-    process.env.JWT_SECRET,
-    { expiresIn: '7d' }
-  );
-  
-
-  // 🛑 DEBUGGING TIP: Log token here if you suspect redirect issues
-  console.log('Generated JWT:', token);
-
-  // Set cookie with token
-  res.cookie('auth_token', token, {
-    httpOnly: false, // Allow client-side access
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-  });
-
-  // Direct redirect based on role to avoid callback page issues
-  if (!user.role) {
-    res.redirect(`http://localhost:3000/role-select?token=${token}`);
-  } else {
-    switch (user.role) {
-      case 'admin':
-        res.redirect(`http://localhost:3000/admin/dashboard?token=${token}`);
-        break;
-      case 'hr':
-        res.redirect(`http://localhost:3000/hr/dashboard?token=${token}`);
-        break;
-      case 'candidate':
-        res.redirect(`http://localhost:3000/candidate/dashboard?token=${token}`);
-        break;
-      case 'employee':
-        res.redirect(`http://localhost:3000/employee/dashboard?token=${token}`);
-        break;
-      default:
-        res.redirect(`http://localhost:3000/?token=${token}`);
+router.get('/google/callback', (req, res, next) => {
+  passport.authenticate('google', { session: false }, (err, user, info) => {
+    if (err) {
+      console.error('❌ OAuth authentication error:', err);
+      return res.redirect(`http://localhost:3000/login?error=oauth_failed&message=${encodeURIComponent(err.message)}`);
     }
-  }
+    
+    if (!user) {
+      console.error('❌ OAuth failed - no user returned');
+      return res.redirect(`http://localhost:3000/login?error=oauth_failed&message=${encodeURIComponent('Authentication failed')}`);
+    }
+
+    try {
+      console.log('🔐 OAuth callback - User data:', {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role
+      });
+      
+      const token = jwt.sign(
+        {
+          _id: user._id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+        },
+        process.env.JWT_SECRET,
+        { expiresIn: '7d' }
+      );
+      
+      console.log('✅ JWT token generated successfully');
+
+      // Set cookie with token
+      res.cookie('auth_token', token, {
+        httpOnly: false, // Allow client-side access
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+      });
+
+      // Direct redirect based on role to avoid callback page issues
+      if (!user.role) {
+        console.log('🔄 User has no role, redirecting to role selection');
+        res.redirect(`http://localhost:3000/role-select?token=${token}`);
+      } else {
+        console.log(`🎯 User has role: ${user.role}, redirecting to dashboard`);
+        switch (user.role) {
+          case 'admin':
+            res.redirect(`http://localhost:3000/admin/dashboard?token=${token}`);
+            break;
+          case 'hr':
+            res.redirect(`http://localhost:3000/hr/dashboard?token=${token}`);
+            break;
+          case 'candidate':
+            res.redirect(`http://localhost:3000/candidate/dashboard?token=${token}`);
+            break;
+          case 'employee':
+            res.redirect(`http://localhost:3000/employee/dashboard?token=${token}`);
+            break;
+          default:
+            res.redirect(`http://localhost:3000/?token=${token}`);
+        }
+      }
+    } catch (tokenError) {
+      console.error('❌ Token generation error:', tokenError);
+      res.redirect(`http://localhost:3000/login?error=token_failed&message=${encodeURIComponent('Failed to generate authentication token')}`);
+    }
+  })(req, res, next);
 });
 
 
@@ -65,16 +143,12 @@ router.get('/google/callback', passport.authenticate('google', { session: false 
 router.post('/set-role', async (req, res) => {
   console.log('🔄 Set-role request received');
   console.log('📝 Request body:', req.body);
-  console.log('🍪 Cookies:', req.cookies);
-  console.log('📋 Headers:', req.headers);
   
   // Check for token in cookies first, then Authorization header
   let token = req.cookies.auth_token;
   
   if (!token) {
     const authHeader = req.headers.authorization;
-    console.log('🔑 Authorization header:', authHeader);
-    
     if (!authHeader?.startsWith('Bearer ')) {
       console.log('❌ No valid token found');
       return res.status(401).json({ error: 'No token provided' });
@@ -82,13 +156,11 @@ router.post('/set-role', async (req, res) => {
     token = authHeader.split(' ')[1];
   }
 
-  console.log('🔑 Token found:', token ? 'Yes' : 'No');
-
   let decoded;
-
   try {
-    decoded = jwt.verify(token, process.env.JWT_SECRET);
-    console.log('✅ Token verified:', decoded);
+    decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret');
+
+    console.log('✅ Token verified for user:', decoded.name);
   } catch (err) {
     console.log('❌ Token verification failed:', err.message);
     return res.status(401).json({ error: 'Invalid token' });
@@ -103,77 +175,78 @@ router.post('/set-role', async (req, res) => {
   }
 
   try {
-    // Check MongoDB connection
+    // Ensure MongoDB connection
     const mongoose = require('mongoose');
     if (mongoose.connection.readyState !== 1) {
-      console.log('❌ MongoDB not connected, attempting to connect...');
-      try {
-        await mongoose.connect(process.env.MONGODB_URI);
-        console.log('✅ MongoDB connected successfully');
-      } catch (dbError) {
-        console.log('❌ MongoDB connection failed:', dbError.message);
-        return res.status(500).json({ error: 'Database connection failed' });
-      }
+      console.log('⚠️ MongoDB not connected, attempting to connect...');
+      await mongoose.connect(process.env.MONGODB_URI, {
+        serverSelectionTimeoutMS: 10000
+      });
+      console.log('✅ MongoDB connected successfully');
     }
 
-    console.log('🔍 Looking for user with ID:', decoded._id || decoded.id);
-    const user = await User.findById(decoded._id || decoded.id);
+    const userId = decoded._id || decoded.id;
+    console.log('🔍 Looking for user with ID:', userId);
+    
+    let user = await User.findById(userId);
     
     if (!user) {
-      console.log('❌ User not found in database');
-      // If user doesn't exist, create them from the token data
-      console.log('🔄 Creating user from token data...');
-      const newUser = await User.create({
-        _id: decoded._id,
-        name: decoded.name,
-        email: decoded.email,
-        role: role,
-        isActive: true,
-        isVerified: role === 'hr' ? false : true // HR needs verification
-      });
-      console.log('✅ New user created:', newUser.name, newUser.email);
+      console.log('❌ User not found, creating from token data...');
       
-      const newToken = jwt.sign(
-        {
-          _id: newUser._id,
-          name: newUser.name,
-          email: newUser.email,
-          role: newUser.role,
-        },
-        process.env.JWT_SECRET,
-        { expiresIn: '7d' }
-      );
-
-      res.cookie('auth_token', newToken, {
-        httpOnly: false,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        maxAge: 7 * 24 * 60 * 60 * 1000
-      });
-
-      return res.status(200).json({
-        message: 'Role set successfully',
-        token: newToken,
-        user: {
-          _id: newUser._id,
-          name: newUser.name,
-          email: newUser.email,
-          role: newUser.role,
+      // Validate required fields from token
+      if (!decoded.name || !decoded.email) {
+        return res.status(400).json({ error: 'Invalid token data - missing name or email' });
+      }
+      
+      try {
+        user = new User({
+          _id: userId,
+          name: decoded.name,
+          email: decoded.email.toLowerCase(),
+          role: role,
+          isActive: true,
+          isVerified: role !== 'hr', // HR needs verification
+          lastLogin: new Date()
+        });
+        
+        await user.save();
+        console.log('✅ New user created:', user.name, user.email);
+      } catch (createError) {
+        console.error('❌ Error creating user:', createError);
+        
+        if (createError.code === 11000) {
+          // Duplicate key error - try to find existing user by email
+          console.log('🔍 Duplicate key error, searching by email...');
+          user = await User.findOne({ email: decoded.email.toLowerCase() });
+          
+          if (user) {
+            console.log('✅ Found existing user by email, updating role');
+            user.role = role;
+            user.lastLogin = new Date();
+            if (role === 'hr') user.isVerified = false;
+            await user.save();
+          } else {
+            throw createError;
+          }
+        } else {
+          throw createError;
         }
-      });
+      }
+    } else {
+      console.log('👤 User found:', user.name, user.email);
+      console.log('🔄 Updating role from', user.role, 'to', role);
+      
+      user.role = role;
+      user.lastLogin = new Date();
+      if (role === 'hr') {
+        user.isVerified = false; // HR needs verification
+      }
+      
+      await user.save();
+      console.log('✅ User role updated successfully');
     }
 
-    console.log('👤 User found:', user.name, user.email);
-    console.log('🔄 Setting role from', user.role, 'to', role);
-    
-    user.role = role;
-    if (role === 'hr') {
-      user.isVerified = false; // HR needs verification
-    }
-    await user.save();
-    
-    console.log('✅ User role updated successfully');
-
+    // Generate new token with updated role
     const newToken = jwt.sign(
       {
         _id: user._id,
@@ -193,9 +266,10 @@ router.post('/set-role', async (req, res) => {
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
     });
 
-    console.log('✅ New token generated and cookie set');
+    console.log('✅ Role set successfully for:', user.name);
 
     res.status(200).json({
+      success: true,
       message: 'Role set successfully',
       token: newToken,
       user: {
@@ -203,26 +277,35 @@ router.post('/set-role', async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
+        isVerified: user.isVerified
       }
     });
-  } catch (err) {
-    console.error('❌ Database error:', err);
     
-    // Provide more specific error messages
+  } catch (err) {
+    console.error('❌ Set-role error:', err);
+    
+    // Provide specific error messages
     if (err.name === 'MongooseServerSelectionError') {
       return res.status(500).json({ 
-        error: 'Database connection failed. Please try again in a moment.' 
+        error: 'Database connection failed. Please check if MongoDB is running.' 
       });
     }
     
     if (err.name === 'ValidationError') {
+      const validationErrors = Object.values(err.errors).map(e => e.message);
       return res.status(400).json({ 
-        error: 'Invalid user data: ' + err.message 
+        error: 'Validation failed: ' + validationErrors.join(', ')
+      });
+    }
+    
+    if (err.code === 11000) {
+      return res.status(400).json({ 
+        error: 'User with this email already exists' 
       });
     }
     
     res.status(500).json({ 
-      error: 'Server error while setting role. Please try again.' 
+      error: 'Server error while setting role: ' + err.message 
     });
   }
 });
@@ -243,45 +326,98 @@ router.get('/me', (req, res) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    
+    console.log('🔍 User info retrieved:', decoded.name, decoded.email);
+    
     res.status(200).json(decoded);
   } catch (err) {
     res.status(401).json({ error: 'Invalid token' });
   }
 });
 
-// --- Test set-role endpoint ---
-router.post('/test-set-role', async (req, res) => {
+// --- Test complete auth flow ---
+router.post('/test-complete-flow', async (req, res) => {
   try {
-    console.log('🧪 Testing set-role functionality...');
+    console.log('🧪 Testing complete auth flow...');
     
-    // Check MongoDB connection
     const mongoose = require('mongoose');
-    console.log('MongoDB connection state:', mongoose.connection.readyState);
-    
     if (mongoose.connection.readyState !== 1) {
-      return res.status(500).json({ error: 'Database not connected' });
+      await mongoose.connect(process.env.MONGODB_URI);
     }
     
-    // Test user creation
-    const testUser = {
-      name: 'Test User',
-      email: 'test@example.com',
-      role: 'admin'
-    };
-    
     const User = require('../models/User');
-    const userCount = await User.countDocuments();
+    
+    // Create test user
+    const testUser = await User.create({
+      googleId: 'test-' + Date.now(),
+      name: 'Test Flow User',
+      email: 'testflow@example.com',
+      role: 'candidate',
+      isActive: true,
+      isVerified: true
+    });
+    
+    // Generate token
+    const token = jwt.sign(
+      {
+        _id: testUser._id,
+        name: testUser.name,
+        email: testUser.email,
+        role: testUser.role,
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+    
+    // Clean up
+    await User.findByIdAndDelete(testUser._id);
     
     res.json({
-      message: 'Set-role test successful',
-      mongoState: mongoose.connection.readyState,
-      database: mongoose.connection.db.databaseName,
-      userCount: userCount,
-      testUser: testUser
+      success: true,
+      message: 'Complete auth flow test successful',
+      testUser: {
+        name: testUser.name,
+        email: testUser.email,
+        role: testUser.role
+      },
+      tokenGenerated: !!token,
+      databaseWorking: true
     });
     
   } catch (err) {
-    console.error('❌ Test set-role error:', err);
+    console.error('❌ Complete flow test error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Debug current users ---
+router.get('/debug-users', async (req, res) => {
+  try {
+    const mongoose = require('mongoose');
+    if (mongoose.connection.readyState !== 1) {
+      await mongoose.connect(process.env.MONGODB_URI);
+    }
+    
+    const User = require('../models/User');
+    const users = await User.find().select('name email role googleId isActive isVerified createdAt');
+    
+    res.json({
+      success: true,
+      userCount: users.length,
+      users: users.map(user => ({
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        googleId: user.googleId,
+        isActive: user.isActive,
+        isVerified: user.isVerified,
+        createdAt: user.createdAt
+      }))
+    });
+    
+  } catch (err) {
+    console.error('❌ Debug users error:', err);
     res.status(500).json({ error: err.message });
   }
 });

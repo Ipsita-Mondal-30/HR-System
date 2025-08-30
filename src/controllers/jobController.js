@@ -54,6 +54,8 @@ const createJob = async (req, res) => {
       tags,
       rating,
       createdBy: req.user._id,
+      status: 'pending', // Jobs need admin approval before becoming active
+      isApproved: false, // Require admin approval for all jobs
     });
 
     console.log("✅ Job Created:", job._id);

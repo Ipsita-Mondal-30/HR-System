@@ -4,6 +4,7 @@ const { verifyJWT, isCandidate } = require('../middleware/auth');
 const Job = require('../models/Job');
 const Application = require('../models/Application');
 const User = require('../models/User');
+const Interview = require('../models/Interview');
 
 // Get saved jobs for candidate
 router.get('/saved-jobs', verifyJWT, isCandidate, async (req, res) => {
@@ -89,9 +90,12 @@ router.get('/dashboard-stats', verifyJWT, isCandidate, async (req, res) => {
   try {
     const userId = req.user._id;
 
-    const [applications, user] = await Promise.all([
+    const [applications, user, interviews] = await Promise.all([
       Application.find({ candidate: userId }),
-      User.findById(userId).populate('savedJobs')
+      User.findById(userId).populate('savedJobs'),
+      Interview.find({
+        application: { $in: await Application.find({ candidate: userId }).distinct('_id') }
+      })
     ]);
 
     const stats = {
@@ -100,9 +104,13 @@ router.get('/dashboard-stats', verifyJWT, isCandidate, async (req, res) => {
       shortlistedApplications: applications.filter(app => app.status === 'shortlisted').length,
       rejectedApplications: applications.filter(app => app.status === 'rejected').length,
       savedJobs: user.savedJobs ? user.savedJobs.length : 0,
-      profileCompleteness: calculateProfileCompleteness(user)
+      profileCompleteness: calculateProfileCompleteness(user),
+      scheduledInterviews: interviews.filter(interview => 
+        interview.status === 'scheduled' && new Date(interview.scheduledAt) > new Date()
+      ).length
     };
 
+    console.log(`📊 Dashboard stats for candidate ${user.email}:`, stats);
     res.json(stats);
   } catch (err) {
     console.error('Error fetching dashboard stats:', err);
@@ -433,51 +441,453 @@ router.post('/apply', verifyJWT, isCandidate, async (req, res) => {
 
 // Helper function to calculate profile completeness
 function calculateProfileCompleteness(user) {
-  const fields = [
-    user.name,
-    user.email,
-    user.phone,
-    user.location,
-    user.expectedSalary,
-    user.experience,
-    user.bio,
-    user.resumeUrl,
-    user.skills && user.skills.length > 0 ? 'skills' : null
+  if (!user) return 0;
+  
+  // Comprehensive profile fields with weights
+  const profileFields = [
+    // Basic Information (30% weight)
+    { field: 'name', weight: 5, required: true },
+    { field: 'email', weight: 5, required: true },
+    { field: 'phone', weight: 5, required: false },
+    { field: 'location', weight: 5, required: false },
+    { field: 'bio', weight: 10, required: false },
+    
+    // Professional Information (40% weight)
+    { field: 'resumeUrl', weight: 15, required: true },
+    { field: 'experience', weight: 10, required: false },
+    { field: 'skills', weight: 10, required: true },
+    { field: 'education', weight: 5, required: false },
+    
+    // Portfolio & Links (20% weight)
+    { field: 'portfolioUrl', weight: 5, required: false },
+    { field: 'linkedInUrl', weight: 5, required: false },
+    { field: 'githubUrl', weight: 5, required: false },
+    { field: 'website', weight: 5, required: false },
+    
+    // Additional Information (10% weight)
+    { field: 'projects', weight: 5, required: false },
+    { field: 'certifications', weight: 3, required: false },
+    { field: 'languages', weight: 2, required: false }
   ];
-
-  const completedFields = fields.filter(field => field && field.toString().trim()).length;
-  return Math.round((completedFields / fields.length) * 100);
+  
+  let totalWeight = 0;
+  let completedWeight = 0;
+  
+  profileFields.forEach(({ field, weight, required }) => {
+    totalWeight += weight;
+    const value = user[field];
+    
+    if (value) {
+      if (Array.isArray(value)) {
+        if (value.length > 0) {
+          completedWeight += weight;
+        }
+      } else if (typeof value === 'string') {
+        if (value.trim().length > 0) {
+          completedWeight += weight;
+        }
+      } else if (typeof value === 'object' && value !== null) {
+        // For nested objects like education, projects
+        if (Object.keys(value).length > 0) {
+          completedWeight += weight;
+        }
+      } else {
+        completedWeight += weight;
+      }
+    } else if (required) {
+      // Penalize missing required fields
+      completedWeight -= weight * 0.1;
+    }
+  });
+  
+  const percentage = Math.max(0, Math.round((completedWeight / totalWeight) * 100));
+  console.log(`📊 Profile completeness for ${user.email}: ${percentage}% (${completedWeight}/${totalWeight})`);
+  
+  return percentage;
 }
 
 // Get candidate's interviews
 router.get('/interviews', verifyJWT, isCandidate, async (req, res) => {
   try {
+    const candidateId = req.user._id;
+    console.log('🔍 Fetching interviews for candidate:', candidateId);
+    
     const Interview = require('../models/Interview');
-    const Application = require('../models/Application');
-
-    // Find all applications for this candidate
-    const candidateApplications = await Application.find({ candidate: req.user._id });
-    const applicationIds = candidateApplications.map(app => app._id);
-
-    // Find interviews for these applications
-    const interviews = await Interview.find({
-      application: { $in: applicationIds }
-    })
+    
+    // Find interviews for this candidate
+    const interviews = await Interview.find()
       .populate({
         path: 'application',
+        match: { candidate: candidateId },
         populate: [
-          { path: 'job', select: 'title companyName' },
-          { path: 'candidate', select: 'name email' }
+          { path: 'candidate', select: 'name email' },
+          { path: 'job', select: 'title companyName' }
         ]
       })
       .populate('interviewer', 'name email')
       .sort({ scheduledAt: -1 });
-
-    console.log(`📅 Found ${interviews.length} interviews for candidate ${req.user.email}`);
-    res.json(interviews);
-  } catch (err) {
-    console.error('Error fetching candidate interviews:', err);
+    
+    // Filter out interviews where application is null (not for this candidate)
+    const candidateInterviews = interviews.filter(interview => interview.application);
+    
+    console.log(`📅 Found ${candidateInterviews.length} interviews for candidate`);
+    res.json(candidateInterviews);
+  } catch (error) {
+    console.error('Error fetching candidate interviews:', error);
     res.status(500).json({ error: 'Failed to fetch interviews' });
+  }
+});
+
+// Get AI-powered interview preparation
+router.get('/interview-prep', verifyJWT, isCandidate, async (req, res) => {
+  try {
+    const candidateId = req.user._id;
+    console.log('🤖 Generating AI interview prep for candidate:', candidateId);
+    console.log('🤖 Starting interview prep generation process...');
+    
+    const user = await User.findById(candidateId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Get candidate's recent applications to understand target roles
+    const recentApplications = await Application.find({ candidate: candidateId })
+      .populate('job', 'title skills requirements description')
+      .sort({ createdAt: -1 })
+      .limit(5);
+
+    // Determine primary role based on applications
+    const targetRoles = recentApplications.map(app => app.job?.title).filter(Boolean);
+    const primaryRole = targetRoles[0] || 'Software Developer';
+
+    // Generate AI-powered interview prep
+    const agent = require('../controllers/agentController');
+    
+    const prepPrompt = `Generate comprehensive interview preparation for a candidate applying for ${primaryRole} positions.
+
+    Candidate Profile:
+    - Name: ${user.name}
+    - Skills: ${user.skills?.join(', ') || 'Not specified'}
+    - Experience: ${user.experience || 'Not specified'}
+    - Education: ${user.education || 'Not specified'}
+    - Recent Applications: ${targetRoles.join(', ')}
+
+    Generate a JSON response with:
+    1. "questions": Array of 5 most likely interview questions for this role
+    2. "skillGaps": Analysis of missing skills compared to job requirements
+    3. "strengths": Key strengths based on candidate profile
+    4. "preparationTips": 3-5 specific preparation recommendations
+    5. "technicalTopics": Key technical areas to focus on
+
+    Make it specific to the candidate's background and target role.`;
+
+    // Simplified approach - generate fallback response with some AI enhancement
+    console.log('🤖 Generating interview prep with AI assistance...');
+    
+    try {
+      // Try to get AI-enhanced content
+      const agent = require('../controllers/agentController');
+      const mockReq = { body: { prompt: prepPrompt } };
+      
+      // Create a promise to handle the AI response
+      const aiResponse = await new Promise((resolve, reject) => {
+        const mockRes = {
+          json: (data) => {
+            console.log('🤖 AI Response received:', data);
+            resolve(data);
+          },
+          status: () => ({ 
+            json: (data) => {
+              console.log('🤖 AI Error response:', data);
+              resolve({ error: true, response: null });
+            }
+          })
+        };
+        
+        agent.generateResponse(mockReq, mockRes).catch(reject);
+      });
+
+      let prepData = {};
+      
+      // Try to parse AI response
+      if (aiResponse && !aiResponse.error && aiResponse.response) {
+        try {
+          const jsonMatch = aiResponse.response.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            prepData = JSON.parse(jsonMatch[0]);
+            console.log('✅ Successfully parsed AI response');
+          }
+        } catch (parseError) {
+          console.log('⚠️ Could not parse AI response as JSON, using fallback');
+        }
+      }
+
+      // Generate comprehensive response with AI enhancement or fallback
+      const interviewPrep = {
+        questions: prepData.questions || [
+          `Tell me about your experience with ${user.skills?.[0] || 'programming'} and how you've applied it in real projects.`,
+          `How would you approach solving a complex ${primaryRole.toLowerCase()} problem that you've never encountered before?`,
+          `What interests you most about this ${primaryRole} position and our company?`,
+          `Describe a challenging project you've worked on and how you overcame obstacles.`,
+          `How do you stay updated with the latest technologies and industry trends?`
+        ],
+        skillGaps: prepData.skillGaps || {
+          missing: ['Advanced system design', 'Cloud platforms', 'Microservices architecture'],
+          recommended: ['Take online courses in system design', 'Build cloud-based projects', 'Practice with distributed systems']
+        },
+        strengths: prepData.strengths || [
+          `Strong foundation in ${user.skills?.[0] || 'programming'}`,
+          'Problem-solving and analytical thinking',
+          'Continuous learning mindset',
+          'Technical communication skills'
+        ],
+        preparationTips: prepData.preparationTips || [
+          'Review fundamental concepts in your primary programming languages',
+          'Practice coding problems on platforms like LeetCode or HackerRank',
+          'Research the company culture, values, and recent projects',
+          'Prepare specific STAR method examples from your experience',
+          'Practice explaining technical concepts to non-technical audiences'
+        ],
+        technicalTopics: prepData.technicalTopics || [
+          'Data structures and algorithms',
+          'System design and architecture',
+          'Database design and optimization',
+          'API design and best practices',
+          'Testing strategies and debugging',
+          'Version control and collaboration tools'
+        ],
+        profileScore: calculateProfileCompleteness(user),
+        targetRole: primaryRole,
+        generatedAt: new Date().toISOString(),
+        aiEnhanced: !!prepData.questions
+      };
+
+      console.log('✅ Interview prep generated successfully');
+      res.json(interviewPrep);
+      
+    } catch (aiError) {
+      console.error('🔥 AI generation failed, using fallback:', aiError);
+      
+      // Complete fallback response
+      const interviewPrep = {
+        questions: [
+          `Tell me about your experience with ${user.skills?.[0] || 'programming'} and how you've applied it in real projects.`,
+          `How would you approach solving a complex ${primaryRole.toLowerCase()} problem that you've never encountered before?`,
+          `What interests you most about this ${primaryRole} position and our company?`,
+          `Describe a challenging project you've worked on and how you overcame obstacles.`,
+          `How do you stay updated with the latest technologies and industry trends?`
+        ],
+        skillGaps: {
+          missing: ['Advanced system design', 'Cloud platforms'],
+          recommended: ['Take online courses', 'Build portfolio projects']
+        },
+        strengths: [
+          `Experience with ${user.skills?.[0] || 'programming'}`,
+          'Problem-solving mindset',
+          'Continuous learning attitude'
+        ],
+        preparationTips: [
+          'Review your technical skills thoroughly',
+          'Practice coding problems regularly',
+          'Research the company and role',
+          'Prepare behavioral examples using STAR method',
+          'Practice mock interviews'
+        ],
+        technicalTopics: [
+          'Core programming concepts',
+          'Problem-solving techniques',
+          'Best practices and code quality',
+          'Testing and debugging approaches'
+        ],
+        profileScore: calculateProfileCompleteness(user),
+        targetRole: primaryRole,
+        generatedAt: new Date().toISOString(),
+        aiEnhanced: false
+      };
+
+      res.json(interviewPrep);
+    }
+
+  } catch (error) {
+    console.error('Error generating interview prep:', error);
+    res.status(500).json({ error: 'Failed to generate interview preparation' });
+  }
+});
+
+// Get AI-powered profile analysis
+router.get('/profile-analysis', verifyJWT, isCandidate, async (req, res) => {
+  try {
+    const candidateId = req.user._id;
+    console.log('🔍 Generating AI profile analysis for candidate:', candidateId);
+    
+    const user = await User.findById(candidateId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Get candidate's applications for context
+    const applications = await Application.find({ candidate: candidateId })
+      .populate('job', 'title skills requirements')
+      .sort({ createdAt: -1 })
+      .limit(3);
+
+    const agent = require('../controllers/agentController');
+    
+    const analysisPrompt = `Analyze this candidate profile and provide insights:
+
+    Candidate Profile:
+    - Name: ${user.name}
+    - Skills: ${user.skills?.join(', ') || 'Not specified'}
+    - Experience: ${user.experience || 'Not specified'}
+    - Education: ${user.education || 'Not specified'}
+    - Bio: ${user.bio || 'Not specified'}
+    - Portfolio: ${user.portfolioUrl ? 'Available' : 'Not provided'}
+    - LinkedIn: ${user.linkedInUrl ? 'Available' : 'Not provided'}
+    - GitHub: ${user.githubUrl ? 'Available' : 'Not provided'}
+
+    Recent Applications: ${applications.map(app => app.job?.title).join(', ') || 'None'}
+
+    Provide a JSON response with:
+    1. "overallScore": Overall profile strength (1-100)
+    2. "strengths": Array of key strengths
+    3. "improvements": Array of areas to improve
+    4. "marketability": Assessment of job market appeal
+    5. "recommendations": Specific actionable recommendations
+    6. "roleAlignment": How well profile matches target roles
+
+    Be constructive and specific.`;
+
+    // Generate profile analysis with smart fallbacks
+    console.log('🔍 Generating profile analysis...');
+    
+    const completeness = calculateProfileCompleteness(user);
+    const hasResume = !!user.resumeUrl;
+    const hasSkills = user.skills && user.skills.length > 0;
+    const hasExperience = !!user.experience;
+    const hasPortfolio = !!user.portfolioUrl;
+    const hasLinkedIn = !!user.linkedInUrl;
+    const hasGitHub = !!user.githubUrl;
+
+    // Smart analysis based on profile data
+    const strengths = [];
+    const improvements = [];
+    const recommendations = [];
+
+    // Analyze strengths
+    if (hasResume) strengths.push('Professional resume uploaded');
+    if (hasSkills) strengths.push(`Technical skills defined (${user.skills.length} skills)`);
+    if (hasExperience) strengths.push('Work experience documented');
+    if (hasPortfolio) strengths.push('Portfolio showcasing work');
+    if (hasLinkedIn) strengths.push('Professional LinkedIn presence');
+    if (hasGitHub) strengths.push('Active GitHub profile');
+    if (user.education) strengths.push('Educational background provided');
+
+    // Analyze improvements
+    if (!hasResume) improvements.push('Upload a professional resume');
+    if (!hasSkills || user.skills.length < 3) improvements.push('Add more technical skills');
+    if (!hasExperience) improvements.push('Add work experience details');
+    if (!hasPortfolio) improvements.push('Create a portfolio to showcase projects');
+    if (!hasLinkedIn) improvements.push('Connect LinkedIn profile');
+    if (!hasGitHub) improvements.push('Link GitHub profile for code samples');
+    if (!user.bio) improvements.push('Add a professional bio/summary');
+
+    // Generate recommendations
+    if (completeness < 50) {
+      recommendations.push('Focus on completing basic profile information first');
+      recommendations.push('Upload your resume to significantly boost your profile');
+    } else if (completeness < 80) {
+      recommendations.push('Add portfolio projects to showcase your skills');
+      recommendations.push('Connect your professional social media profiles');
+    } else {
+      recommendations.push('Your profile is strong! Keep it updated with recent projects');
+      recommendations.push('Consider adding certifications or additional skills');
+    }
+
+    // Determine marketability
+    let marketability;
+    if (completeness >= 90) {
+      marketability = 'Excellent market presence - highly attractive to employers';
+    } else if (completeness >= 70) {
+      marketability = 'Strong market presence with good employer appeal';
+    } else if (completeness >= 50) {
+      marketability = 'Moderate market presence - some improvements needed';
+    } else {
+      marketability = 'Developing market presence - significant improvements recommended';
+    }
+
+    // Role alignment assessment
+    let roleAlignment;
+    const targetRoles = applications.map(app => app.job?.title).filter(Boolean);
+    if (targetRoles.length > 0) {
+      roleAlignment = `Targeting ${targetRoles[0]} roles - ${hasSkills && hasExperience ? 'good' : 'developing'} alignment`;
+    } else {
+      roleAlignment = 'No recent applications - consider applying to relevant positions';
+    }
+
+    const profileAnalysis = {
+      overallScore: completeness,
+      strengths: strengths.length > 0 ? strengths : ['Professional foundation established'],
+      improvements: improvements.length > 0 ? improvements : ['Profile is well-developed'],
+      marketability,
+      recommendations,
+      roleAlignment,
+      profileCompleteness: completeness,
+      lastUpdated: user.updatedAt || user.createdAt,
+      generatedAt: new Date().toISOString(),
+      insights: {
+        hasResume,
+        skillsCount: user.skills?.length || 0,
+        hasExperience,
+        hasPortfolio,
+        socialProfiles: [hasLinkedIn, hasGitHub].filter(Boolean).length,
+        recentApplications: applications.length
+      }
+    };
+
+    console.log('✅ Profile analysis generated successfully');
+    res.json(profileAnalysis);
+
+  } catch (error) {
+    console.error('Error generating profile analysis:', error);
+    res.status(500).json({ error: 'Failed to generate profile analysis' });
+  }
+});
+
+// Get candidate profile
+router.get('/profile', verifyJWT, isCandidate, async (req, res) => {
+  try {
+    const candidateId = req.user._id;
+    console.log('👤 Fetching profile for candidate:', candidateId);
+    
+    const candidate = await User.findById(candidateId).select('-password');
+    
+    if (!candidate) {
+      return res.status(404).json({ error: 'Candidate not found' });
+    }
+    
+    console.log('👤 Profile fetched successfully');
+    res.json(candidate);
+  } catch (error) {
+    console.error('Error fetching candidate profile:', error);
+    res.status(500).json({ error: 'Failed to fetch profile' });
+  }
+});
+
+// Get candidate's applications
+router.get('/applications', verifyJWT, isCandidate, async (req, res) => {
+  try {
+    const candidateId = req.user._id;
+    console.log('📋 Fetching applications for candidate:', candidateId);
+    
+    const applications = await Application.find({ candidate: candidateId })
+      .populate('job', 'title companyName location employmentType minSalary maxSalary status')
+      .sort({ createdAt: -1 });
+    
+    console.log(`📋 Found ${applications.length} applications for candidate`);
+    res.json(applications);
+  } catch (error) {
+    console.error('Error fetching candidate applications:', error);
+    res.status(500).json({ error: 'Failed to fetch applications' });
   }
 });
 

@@ -269,6 +269,141 @@ router.put('/:id/scorecard', verifyJWT, isHRorAdmin, async (req, res) => {
       });
     }
 
+    // Generate AI-powered email notifications
+    try {
+      const agent = require('../controllers/agentController');
+      
+      // Generate AI feedback for candidate email
+      const candidateEmailPrompt = `Generate a professional and encouraging email for a candidate who just completed an interview. 
+      
+      Interview Details:
+      - Position: ${interview.application.job.title}
+      - Company: ${interview.application.job.companyName}
+      - Candidate: ${interview.application.name}
+      - Overall Score: ${scorecard.overall}/5
+      - Recommendation: ${scorecard.recommendation}
+      - Technical Skills: ${scorecard.technicalSkills}/5
+      - Communication: ${scorecard.communication}/5
+      - Problem Solving: ${scorecard.problemSolving}/5
+      - Cultural Fit: ${scorecard.culturalFit}/5
+      - Feedback: ${scorecard.feedback}
+      
+      Create a personalized, professional email that:
+      1. Thanks them for their time
+      2. Mentions specific strengths (based on high scores)
+      3. Is encouraging regardless of outcome
+      4. Indicates next steps will follow
+      5. Maintains professionalism
+      
+      Return only the email body content, no subject line.`;
+
+      // Generate AI feedback for HR notification
+      const hrEmailPrompt = `Generate a professional summary email for HR about a completed interview scorecard.
+      
+      Interview Details:
+      - Position: ${interview.application.job.title}
+      - Company: ${interview.application.job.companyName}
+      - Candidate: ${interview.application.name}
+      - Interviewer: ${interview.interviewer.name}
+      - Overall Score: ${scorecard.overall}/5
+      - Recommendation: ${scorecard.recommendation}
+      - Technical Skills: ${scorecard.technicalSkills}/5
+      - Communication: ${scorecard.communication}/5
+      - Problem Solving: ${scorecard.problemSolving}/5
+      - Cultural Fit: ${scorecard.culturalFit}/5
+      - Feedback: ${scorecard.feedback}
+      
+      Create a concise HR summary that:
+      1. Summarizes the interview outcome
+      2. Highlights key strengths and concerns
+      3. Provides clear recommendation
+      4. Suggests next steps
+      5. Is actionable for HR team
+      
+      Return only the email body content, no subject line.`;
+
+      // Generate both emails using AI
+      const mockReq = { body: { prompt: candidateEmailPrompt } };
+      const mockRes = {
+        json: async (data) => {
+          const candidateEmailContent = data.response || 'Thank you for taking the time to interview with us. We will be in touch with next steps soon.';
+          
+          // Send candidate email
+          await sendEmail({
+            to: interview.application.email,
+            subject: `Interview Update: ${interview.application.job.title} at ${interview.application.job.companyName}`,
+            html: `
+              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #2563eb;">Interview Update 📋</h2>
+                <p>Dear ${interview.application.name},</p>
+                ${candidateEmailContent}
+                <div style="background-color: #f3f4f6; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                  <p style="margin: 0;"><strong>Interview Summary:</strong></p>
+                  <p style="margin: 5px 0;">Position: ${interview.application.job.title}</p>
+                  <p style="margin: 5px 0;">Date: ${new Date(interview.scheduledAt).toLocaleDateString()}</p>
+                  <p style="margin: 5px 0;">Duration: ${interview.duration} minutes</p>
+                </div>
+                <p>Best regards,<br>The ${interview.application.job.companyName} Hiring Team</p>
+              </div>
+            `
+          });
+
+          // Generate HR email
+          const hrMockReq = { body: { prompt: hrEmailPrompt } };
+          const hrMockRes = {
+            json: async (hrData) => {
+              const hrEmailContent = hrData.response || `Interview completed for ${interview.application.name}. Overall score: ${scorecard.overall}/5. Recommendation: ${scorecard.recommendation}.`;
+              
+              // Send HR notification email
+              await sendEmail({
+                to: interview.interviewer.email,
+                subject: `Interview Scorecard Submitted: ${interview.application.name} - ${interview.application.job.title}`,
+                html: `
+                  <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                    <h2 style="color: #2563eb;">Interview Scorecard Summary 📊</h2>
+                    <p>Dear ${interview.interviewer.name},</p>
+                    ${hrEmailContent}
+                    
+                    <div style="background-color: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                      <h3 style="margin-top: 0; color: #374151;">Scorecard Details:</h3>
+                      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                        <p><strong>Technical Skills:</strong> ${scorecard.technicalSkills}/5</p>
+                        <p><strong>Communication:</strong> ${scorecard.communication}/5</p>
+                        <p><strong>Problem Solving:</strong> ${scorecard.problemSolving}/5</p>
+                        <p><strong>Cultural Fit:</strong> ${scorecard.culturalFit}/5</p>
+                      </div>
+                      <p><strong>Overall Score:</strong> ${scorecard.overall}/5</p>
+                      <p><strong>Recommendation:</strong> ${scorecard.recommendation.toUpperCase()}</p>
+                    </div>
+                    
+                    ${scorecard.feedback ? `
+                    <div style="background-color: #dbeafe; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                      <h4 style="margin-top: 0;">Detailed Feedback:</h4>
+                      <p style="margin: 0;">${scorecard.feedback}</p>
+                    </div>
+                    ` : ''}
+                    
+                    <p>You can view the complete scorecard in the admin dashboard.</p>
+                    <p>Best regards,<br>HR System</p>
+                  </div>
+                `
+              });
+            },
+            status: () => ({ json: () => {} })
+          };
+          
+          await agent.generateResponse(hrMockReq, hrMockRes);
+        },
+        status: () => ({ json: () => {} })
+      };
+      
+      await agent.generateResponse(mockReq, mockRes);
+      
+    } catch (emailError) {
+      console.error('Failed to send AI-powered emails:', emailError);
+      // Don't fail the scorecard submission if emails fail
+    }
+
     res.json({
       message: 'Scorecard submitted successfully',
       interview

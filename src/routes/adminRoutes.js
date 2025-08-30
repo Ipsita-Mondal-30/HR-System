@@ -181,6 +181,77 @@ router.put('/users/:userId/verify', verifyJWT, isHRorAdmin, async (req, res) => 
     }
 });
 
+// Delete single user with cascade deletion
+router.delete('/users/:userId', verifyJWT, isHRorAdmin, async (req, res) => {
+    try {
+        const { userId } = req.params;
+        
+        console.log(`🗑️ Admin deleting user: ${userId}`);
+        
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        
+        console.log(`🗑️ Deleting user: ${user.name} (${user.email}) - Role: ${user.role}`);
+        
+        // Cascade deletion based on user role
+        if (user.role === 'candidate') {
+            // Delete candidate's applications and related interviews
+            const applications = await Application.find({ candidate: userId });
+            const applicationIds = applications.map(app => app._id);
+            
+            // Delete interviews related to candidate's applications
+            const deletedInterviews = await Interview.deleteMany({ 
+                application: { $in: applicationIds } 
+            });
+            
+            // Delete applications
+            const deletedApplications = await Application.deleteMany({ candidate: userId });
+            
+            console.log(`🗑️ Cascade deleted: ${deletedApplications.deletedCount} applications, ${deletedInterviews.deletedCount} interviews`);
+            
+        } else if (user.role === 'hr') {
+            // Delete HR user's jobs and related data
+            const jobs = await Job.find({ createdBy: userId });
+            const jobIds = jobs.map(job => job._id);
+            
+            // Delete applications for HR's jobs
+            const deletedApplications = await Application.deleteMany({ 
+                job: { $in: jobIds } 
+            });
+            
+            // Delete interviews for HR's jobs
+            const deletedInterviews = await Interview.deleteMany({ 
+                interviewer: userId 
+            });
+            
+            // Delete jobs
+            const deletedJobs = await Job.deleteMany({ createdBy: userId });
+            
+            console.log(`🗑️ Cascade deleted: ${deletedJobs.deletedCount} jobs, ${deletedApplications.deletedCount} applications, ${deletedInterviews.deletedCount} interviews`);
+        }
+        
+        // Delete the user
+        await User.findByIdAndDelete(userId);
+        
+        console.log(`✅ Successfully deleted user: ${user.name}`);
+        res.json({ 
+            message: `User ${user.name} deleted successfully`,
+            deletedUser: {
+                id: user._id,
+                name: user.name,
+                email: user.email,
+                role: user.role
+            }
+        });
+        
+    } catch (err) {
+        console.error('Error deleting user:', err);
+        res.status(500).json({ error: 'Failed to delete user' });
+    }
+});
+
 // Bulk user operations
 router.post('/users/bulk-action', verifyJWT, isHRorAdmin, async (req, res) => {
     try {
@@ -195,8 +266,34 @@ router.post('/users/bulk-action', verifyJWT, isHRorAdmin, async (req, res) => {
                 updateData = { isActive: false };
                 break;
             case 'delete':
-                await User.deleteMany({ _id: { $in: userIds } });
-                return res.json({ message: `${userIds.length} users deleted` });
+                console.log(`🗑️ Bulk deleting ${userIds.length} users`);
+                
+                // Perform cascade deletion for each user
+                for (const userId of userIds) {
+                    const user = await User.findById(userId);
+                    if (!user) continue;
+                    
+                    if (user.role === 'candidate') {
+                        const applications = await Application.find({ candidate: userId });
+                        const applicationIds = applications.map(app => app._id);
+                        
+                        await Interview.deleteMany({ application: { $in: applicationIds } });
+                        await Application.deleteMany({ candidate: userId });
+                        
+                    } else if (user.role === 'hr') {
+                        const jobs = await Job.find({ createdBy: userId });
+                        const jobIds = jobs.map(job => job._id);
+                        
+                        await Application.deleteMany({ job: { $in: jobIds } });
+                        await Interview.deleteMany({ interviewer: userId });
+                        await Job.deleteMany({ createdBy: userId });
+                    }
+                }
+                
+                const result = await User.deleteMany({ _id: { $in: userIds } });
+                console.log(`✅ Bulk deleted ${result.deletedCount} users`);
+                return res.json({ message: `${result.deletedCount} users deleted successfully` });
+                
             default:
                 return res.status(400).json({ error: 'Invalid action' });
         }
@@ -691,6 +788,52 @@ router.get('/job-categories', verifyJWT, isHRorAdmin, async (req, res) => {
     } catch (err) {
         console.error('Error fetching job categories:', err);
         res.status(500).json({ error: 'Failed to fetch job categories' });
+    }
+});
+
+// Interview Management Routes
+router.get('/interviews', verifyJWT, isHRorAdmin, async (req, res) => {
+    try {
+        const Interview = require('../models/Interview');
+        
+        const interviews = await Interview.find()
+            .populate({
+                path: 'application',
+                populate: [
+                    { path: 'candidate', select: 'name email' },
+                    { path: 'job', select: 'title companyName' }
+                ]
+            })
+            .populate('interviewer', 'name email')
+            .sort({ scheduledAt: -1 });
+
+        // Transform data for admin view
+        const transformedInterviews = interviews.map(interview => ({
+            _id: interview._id,
+            candidateId: interview.application?.candidate?._id,
+            candidateName: interview.application?.candidate?.name || 'Unknown',
+            candidateEmail: interview.application?.candidate?.email || 'Unknown',
+            hrId: interview.interviewer?._id,
+            hrName: interview.interviewer?.name || 'Unknown',
+            hrCompany: interview.application?.job?.companyName || 'Unknown',
+            jobId: interview.application?.job?._id,
+            jobTitle: interview.application?.job?.title || 'Unknown',
+            scheduledAt: interview.scheduledAt,
+            duration: interview.duration || 60,
+            status: interview.status,
+            type: interview.type || 'video',
+            notes: interview.notes,
+            feedback: interview.feedback,
+            rating: interview.rating,
+            outcome: interview.outcome,
+            createdAt: interview.createdAt
+        }));
+
+        console.log(`📊 Found ${transformedInterviews.length} interviews for admin`);
+        res.json(transformedInterviews);
+    } catch (err) {
+        console.error('Error fetching admin interviews:', err);
+        res.status(500).json({ error: 'Failed to fetch interviews' });
     }
 });
 

@@ -25,7 +25,9 @@ const getAdminStats = async (req, res) => {
       recentCandidates,
       recentHRs,
       recentJobs,
-      recentApplications
+      recentApplications,
+      totalInterviews,
+      upcomingInterviews
     ] = await Promise.all([
       User.countDocuments(),
       Job.countDocuments(),
@@ -54,6 +56,11 @@ const getAdminStats = async (req, res) => {
       }),
       Application.countDocuments({ 
         createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } 
+      }),
+      Interview.countDocuments(),
+      Interview.countDocuments({ 
+        status: 'scheduled', 
+        scheduledAt: { $gte: new Date() } 
       })
     ]);
 
@@ -71,6 +78,8 @@ const getAdminStats = async (req, res) => {
       pendingApplications,
       pendingHRVerifications,
       pendingJobApprovals: await Job.countDocuments({ status: 'pending' }),
+      totalInterviews,
+      upcomingInterviews,
       avgMatchScore: Number(avgMatchScore.toFixed(1)),
       recentActivity: {
         newCandidates: recentCandidates,
@@ -136,6 +145,13 @@ const getCandidates = async (req, res) => {
   try {
     console.log('📊 Fetching candidates with activity data...');
     
+    // Add cache-busting headers
+    res.set({
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0'
+    });
+    
     const candidates = await User.find({ role: 'candidate' })
       .select('name email phone location skills experience createdAt lastActive')
       .sort({ createdAt: -1 });
@@ -186,6 +202,13 @@ const getCandidates = async (req, res) => {
 const getHRUsers = async (req, res) => {
   try {
     console.log('📊 Fetching HR users with activity data...');
+    
+    // Add cache-busting headers
+    res.set({
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0'
+    });
     
     const hrUsers = await User.find({ role: 'hr' })
       .select('name email phone companyName department position isVerified createdAt lastActive')
@@ -805,20 +828,37 @@ const exportData = async (req, res) => {
 
 // Helper function to calculate profile completion
 const calculateProfileCompletion = (user) => {
-  let completion = 0;
-  const fields = ['name', 'email', 'phone', 'location', 'skills', 'experience'];
+  if (!user) return 0;
+  
+  const fields = [
+    'name',
+    'email', 
+    'phone',
+    'location',
+    'skills',
+    'experience',
+    'education',
+    'resumeUrl',
+    'linkedinUrl',
+    'portfolioUrl'
+  ];
+  
+  let completedFields = 0;
   
   fields.forEach(field => {
-    if (user[field]) {
-      if (Array.isArray(user[field])) {
-        completion += user[field].length > 0 ? (100 / fields.length) : 0;
+    const value = user[field];
+    if (value) {
+      if (Array.isArray(value)) {
+        if (value.length > 0) completedFields++;
+      } else if (typeof value === 'string') {
+        if (value.trim().length > 0) completedFields++;
       } else {
-        completion += 100 / fields.length;
+        completedFields++;
       }
     }
   });
   
-  return Math.round(completion);
+  return Math.round((completedFields / fields.length) * 100);
 };
 
 
