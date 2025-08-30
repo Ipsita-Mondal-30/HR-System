@@ -61,7 +61,11 @@ router.delete('/saved-jobs/:jobId', verifyJWT, isCandidate, async (req, res) => 
 router.get('/profile', verifyJWT, isCandidate, async (req, res) => {
   try {
     const user = await User.findById(req.user._id).select('-password');
-    res.json(user);
+    const userWithCompleteness = {
+      ...user.toObject(),
+      profileCompleteness: calculateProfileCompleteness(user)
+    };
+    res.json(userWithCompleteness);
   } catch (err) {
     console.error('Error fetching profile:', err);
     res.status(500).json({ error: 'Failed to fetch profile' });
@@ -78,7 +82,12 @@ router.put('/profile', verifyJWT, isCandidate, async (req, res) => {
       { new: true, runValidators: true }
     ).select('-password');
 
-    res.json(user);
+    const userWithCompleteness = {
+      ...user.toObject(),
+      profileCompleteness: calculateProfileCompleteness(user)
+    };
+
+    res.json(userWithCompleteness);
   } catch (err) {
     console.error('Error updating profile:', err);
     res.status(500).json({ error: 'Failed to update profile' });
@@ -105,7 +114,7 @@ router.get('/dashboard-stats', verifyJWT, isCandidate, async (req, res) => {
       rejectedApplications: applications.filter(app => app.status === 'rejected').length,
       savedJobs: user.savedJobs ? user.savedJobs.length : 0,
       profileCompleteness: calculateProfileCompleteness(user),
-      scheduledInterviews: interviews.filter(interview => 
+      scheduledInterviews: interviews.filter(interview =>
         interview.status === 'scheduled' && new Date(interview.scheduledAt) > new Date()
       ).length
     };
@@ -442,7 +451,7 @@ router.post('/apply', verifyJWT, isCandidate, async (req, res) => {
 // Helper function to calculate profile completeness
 function calculateProfileCompleteness(user) {
   if (!user) return 0;
-  
+
   // Comprehensive profile fields with weights
   const profileFields = [
     // Basic Information (30% weight)
@@ -451,32 +460,32 @@ function calculateProfileCompleteness(user) {
     { field: 'phone', weight: 5, required: false },
     { field: 'location', weight: 5, required: false },
     { field: 'bio', weight: 10, required: false },
-    
+
     // Professional Information (40% weight)
     { field: 'resumeUrl', weight: 15, required: true },
     { field: 'experience', weight: 10, required: false },
     { field: 'skills', weight: 10, required: true },
     { field: 'education', weight: 5, required: false },
-    
+
     // Portfolio & Links (20% weight)
     { field: 'portfolioUrl', weight: 5, required: false },
     { field: 'linkedInUrl', weight: 5, required: false },
     { field: 'githubUrl', weight: 5, required: false },
     { field: 'website', weight: 5, required: false },
-    
+
     // Additional Information (10% weight)
     { field: 'projects', weight: 5, required: false },
     { field: 'certifications', weight: 3, required: false },
     { field: 'languages', weight: 2, required: false }
   ];
-  
+
   let totalWeight = 0;
   let completedWeight = 0;
-  
+
   profileFields.forEach(({ field, weight, required }) => {
     totalWeight += weight;
     const value = user[field];
-    
+
     if (value) {
       if (Array.isArray(value)) {
         if (value.length > 0) {
@@ -499,10 +508,10 @@ function calculateProfileCompleteness(user) {
       completedWeight -= weight * 0.1;
     }
   });
-  
+
   const percentage = Math.max(0, Math.round((completedWeight / totalWeight) * 100));
   console.log(`📊 Profile completeness for ${user.email}: ${percentage}% (${completedWeight}/${totalWeight})`);
-  
+
   return percentage;
 }
 
@@ -511,9 +520,9 @@ router.get('/interviews', verifyJWT, isCandidate, async (req, res) => {
   try {
     const candidateId = req.user._id;
     console.log('🔍 Fetching interviews for candidate:', candidateId);
-    
+
     const Interview = require('../models/Interview');
-    
+
     // Find interviews for this candidate
     const interviews = await Interview.find()
       .populate({
@@ -526,10 +535,10 @@ router.get('/interviews', verifyJWT, isCandidate, async (req, res) => {
       })
       .populate('interviewer', 'name email')
       .sort({ scheduledAt: -1 });
-    
+
     // Filter out interviews where application is null (not for this candidate)
     const candidateInterviews = interviews.filter(interview => interview.application);
-    
+
     console.log(`📅 Found ${candidateInterviews.length} interviews for candidate`);
     res.json(candidateInterviews);
   } catch (error) {
@@ -544,7 +553,7 @@ router.get('/interview-prep', verifyJWT, isCandidate, async (req, res) => {
     const candidateId = req.user._id;
     console.log('🤖 Generating AI interview prep for candidate:', candidateId);
     console.log('🤖 Starting interview prep generation process...');
-    
+
     const user = await User.findById(candidateId);
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
@@ -562,7 +571,7 @@ router.get('/interview-prep', verifyJWT, isCandidate, async (req, res) => {
 
     // Generate AI-powered interview prep
     const agent = require('../controllers/agentController');
-    
+
     const prepPrompt = `Generate comprehensive interview preparation for a candidate applying for ${primaryRole} positions.
 
     Candidate Profile:
@@ -583,12 +592,12 @@ router.get('/interview-prep', verifyJWT, isCandidate, async (req, res) => {
 
     // Simplified approach - generate fallback response with some AI enhancement
     console.log('🤖 Generating interview prep with AI assistance...');
-    
+
     try {
       // Try to get AI-enhanced content
       const agent = require('../controllers/agentController');
       const mockReq = { body: { prompt: prepPrompt } };
-      
+
       // Create a promise to handle the AI response
       const aiResponse = await new Promise((resolve, reject) => {
         const mockRes = {
@@ -596,19 +605,19 @@ router.get('/interview-prep', verifyJWT, isCandidate, async (req, res) => {
             console.log('🤖 AI Response received:', data);
             resolve(data);
           },
-          status: () => ({ 
+          status: () => ({
             json: (data) => {
               console.log('🤖 AI Error response:', data);
               resolve({ error: true, response: null });
             }
           })
         };
-        
+
         agent.generateResponse(mockReq, mockRes).catch(reject);
       });
 
       let prepData = {};
-      
+
       // Try to parse AI response
       if (aiResponse && !aiResponse.error && aiResponse.response) {
         try {
@@ -664,10 +673,10 @@ router.get('/interview-prep', verifyJWT, isCandidate, async (req, res) => {
 
       console.log('✅ Interview prep generated successfully');
       res.json(interviewPrep);
-      
+
     } catch (aiError) {
       console.error('🔥 AI generation failed, using fallback:', aiError);
-      
+
       // Complete fallback response
       const interviewPrep = {
         questions: [
@@ -719,7 +728,7 @@ router.get('/profile-analysis', verifyJWT, isCandidate, async (req, res) => {
   try {
     const candidateId = req.user._id;
     console.log('🔍 Generating AI profile analysis for candidate:', candidateId);
-    
+
     const user = await User.findById(candidateId);
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
@@ -732,7 +741,7 @@ router.get('/profile-analysis', verifyJWT, isCandidate, async (req, res) => {
       .limit(3);
 
     const agent = require('../controllers/agentController');
-    
+
     const analysisPrompt = `Analyze this candidate profile and provide insights:
 
     Candidate Profile:
@@ -759,7 +768,7 @@ router.get('/profile-analysis', verifyJWT, isCandidate, async (req, res) => {
 
     // Generate profile analysis with smart fallbacks
     console.log('🔍 Generating profile analysis...');
-    
+
     const completeness = calculateProfileCompleteness(user);
     const hasResume = !!user.resumeUrl;
     const hasSkills = user.skills && user.skills.length > 0;
@@ -853,36 +862,16 @@ router.get('/profile-analysis', verifyJWT, isCandidate, async (req, res) => {
   }
 });
 
-// Get candidate profile
-router.get('/profile', verifyJWT, isCandidate, async (req, res) => {
-  try {
-    const candidateId = req.user._id;
-    console.log('👤 Fetching profile for candidate:', candidateId);
-    
-    const candidate = await User.findById(candidateId).select('-password');
-    
-    if (!candidate) {
-      return res.status(404).json({ error: 'Candidate not found' });
-    }
-    
-    console.log('👤 Profile fetched successfully');
-    res.json(candidate);
-  } catch (error) {
-    console.error('Error fetching candidate profile:', error);
-    res.status(500).json({ error: 'Failed to fetch profile' });
-  }
-});
-
 // Get candidate's applications
 router.get('/applications', verifyJWT, isCandidate, async (req, res) => {
   try {
     const candidateId = req.user._id;
     console.log('📋 Fetching applications for candidate:', candidateId);
-    
+
     const applications = await Application.find({ candidate: candidateId })
       .populate('job', 'title companyName location employmentType minSalary maxSalary status')
       .sort({ createdAt: -1 });
-    
+
     console.log(`📋 Found ${applications.length} applications for candidate`);
     res.json(applications);
   } catch (error) {

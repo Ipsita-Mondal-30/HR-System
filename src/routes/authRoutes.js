@@ -246,6 +246,25 @@ router.post('/set-role', async (req, res) => {
       console.log('✅ User role updated successfully');
     }
 
+    // If user selected 'employee' role, create Employee profile
+    if (role === 'employee') {
+      const Employee = require('../models/Employee');
+      const existingEmployee = await Employee.findOne({ user: user._id });
+      
+      if (!existingEmployee) {
+        const employee = new Employee({
+          user: user._id,
+          position: 'Employee', // Default position
+          hireDate: new Date(),
+          salary: 50000, // Default salary
+          employmentType: 'full-time',
+          status: 'active'
+        });
+        await employee.save();
+        console.log('✅ Created Employee profile for:', user.name);
+      }
+    }
+
     // Generate new token with updated role
     const newToken = jwt.sign(
       {

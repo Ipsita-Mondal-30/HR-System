@@ -127,6 +127,12 @@ app.use('/api/users', require('./routes/userRoutes'));
 app.use('/api/candidate', require('./routes/candidateRoutes'));
 app.use('/api/hr', require('./routes/hrRoutes'));
 
+// New employee performance system routes
+app.use('/api/employees', require('./routes/employeeRoutes'));
+app.use('/api/projects', require('./routes/projectRoutes'));
+app.use('/api/feedback', require('./routes/feedbackRoutes'));
+app.use('/api/okrs', require('./routes/okrRoutes'));
+
 
 // Debug users endpoint (safe)
 app.get('/api/debug/users', async (req, res) => {
@@ -141,6 +147,22 @@ app.get('/api/debug/users', async (req, res) => {
     });
   } catch (err) {
     console.error('Debug users error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Seed employee data endpoint
+app.post('/api/debug/seed-employees', async (req, res) => {
+  try {
+    const { seedEmployeeData } = require('./utils/seedEmployeeData');
+    const result = await seedEmployeeData();
+    res.json({
+      success: true,
+      message: 'Employee data seeded successfully',
+      data: result
+    });
+  } catch (err) {
+    console.error('Seed employee data error:', err);
     res.status(500).json({ error: err.message });
   }
 });

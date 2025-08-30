@@ -3,6 +3,21 @@ const router = express.Router();
 const { verifyJWT, isAdmin, isHRorAdmin } = require('../middleware/auth');
 const { getAdminStats } = require('../controllers/adminController');
 const adminController = require('../controllers/adminController');
+const {
+  getAllEmployees,
+  createEmployee,
+  updateEmployee,
+  getEmployeeStats
+} = require('../controllers/employeeController');
+const {
+  getAllPayrolls,
+  getPayrollById,
+  createPayroll,
+  updatePayroll,
+  approvePayroll,
+  markAsPaid,
+  getPayrollStats
+} = require('../controllers/payrollController');
 const User = require('../models/User');
 const Job = require('../models/Job');
 const Application = require('../models/Application');
@@ -836,5 +851,231 @@ router.get('/interviews', verifyJWT, isHRorAdmin, async (req, res) => {
         res.status(500).json({ error: 'Failed to fetch interviews' });
     }
 });
+
+// Employee Management Routes
+router.get('/employees', verifyJWT, isHRorAdmin, getAllEmployees);
+router.get('/employees/:id', verifyJWT, isHRorAdmin, async (req, res) => {
+  try {
+    const Employee = require('../models/Employee');
+    const employee = await Employee.findById(req.params.id)
+      .populate('user', 'name email')
+      .populate('department', 'name')
+      .populate('manager', 'user position')
+      .populate({
+        path: 'manager',
+        populate: {
+          path: 'user',
+          select: 'name'
+        }
+      });
+
+    if (!employee) {
+      return res.status(404).json({ message: 'Employee not found' });
+    }
+
+    // Add stats
+    const Project = require('../models/Project');
+    const OKR = require('../models/OKR');
+    const Feedback = require('../models/Feedback');
+
+    const [projectsCount, okrsCount, feedbackCount] = await Promise.all([
+      Project.countDocuments({ 'teamMembers.employee': employee._id }),
+      OKR.countDocuments({ employee: employee._id }),
+      Feedback.countDocuments({ employee: employee._id })
+    ]);
+
+    const feedbacks = await Feedback.find({ employee: employee._id });
+    const avgRating = feedbacks.length > 0 
+      ? feedbacks.reduce((sum, f) => sum + (f.overallRating || 0), 0) / feedbacks.length 
+      : 0;
+
+    const employeeWithStats = {
+      ...employee.toObject(),
+      stats: {
+        projectsCount,
+        okrsCount,
+        feedbackCount,
+        avgRating
+      }
+    };
+
+    res.json(employeeWithStats);
+  } catch (error) {
+    console.error('Error fetching employee:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Test route (no auth required)
+router.get('/test-employees', async (req, res) => {
+  try {
+    const Employee = require('../models/Employee');
+    const employees = await Employee.find({ status: 'active' })
+      .populate('user', 'name email')
+      .populate('department', 'name');
+    
+    res.json({ 
+      success: true,
+      count: employees.length,
+      employees: employees.map(emp => ({
+        name: emp.user.name,
+        email: emp.user.email,
+        position: emp.position,
+        department: emp.department?.name || 'No Department'
+      }))
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+router.post('/employees', verifyJWT, isHRorAdmin, createEmployee);
+router.put('/employees/:id', verifyJWT, isHRorAdmin, updateEmployee);
+router.get('/employees/stats', verifyJWT, isHRorAdmin, getEmployeeStats);
+router.get('/employees/:id/projects', verifyJWT, isHRorAdmin, async (req, res) => {
+  try {
+    const Project = require('../models/Project');
+    const projects = await Project.find({
+      'teamMembers.employee': req.params.id
+    }).populate('projectManager', 'user position');
+    
+    const projectsWithDetails = projects.map(project => {
+      const teamMember = project.teamMembers.find(
+        member => member.employee.toString() === req.params.id
+      );
+      
+      return {
+        _id: project._id,
+        name: project.name,
+        status: project.status,
+        completionPercentage: project.completionPercentage,
+        role: teamMember?.role || 'team-member',
+        contributionPercentage: teamMember?.contributionPercentage || 0,
+        hoursWorked: teamMember?.hoursWorked || 0
+      };
+    });
+    
+    res.json({ projects: projectsWithDetails });
+  } catch (error) {
+    console.error('Error fetching employee projects:', error);
+    res.status(500).json({ error: 'Failed to fetch employee projects' });
+  }
+});
+
+router.post('/employees/:id/ai-insights', verifyJWT, isHRorAdmin, async (req, res) => {
+  try {
+    const Employee = require('../models/Employee');
+    const Project = require('../models/Project');
+    const Feedback = require('../models/Feedback');
+    const OKR = require('../models/OKR');
+    
+    const employee = await Employee.findById(req.params.id)
+      .populate('user', 'name')
+      .populate('department', 'name');
+    
+    if (!employee) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+    
+    // Generate basic AI insights (simplified version)
+    const insights = {
+      promotionReadiness: {
+        score: Math.min(employee.performanceScore + 10, 100),
+        reasons: ['Strong performance metrics', 'Consistent project delivery'],
+        lastUpdated: new Date()
+      },
+      attritionRisk: {
+        score: Math.max(100 - employee.performanceScore - 20, 0),
+        factors: ['Performance tracking needed', 'Engagement monitoring required'],
+        lastUpdated: new Date()
+      },
+      strengths: ['Technical skills', 'Project execution', 'Team collaboration'],
+      improvementAreas: ['Communication', 'Leadership development', 'Time management'],
+      lastAnalyzed: new Date()
+    };
+    
+    // Update employee record
+    employee.aiInsights = insights;
+    await employee.save();
+    
+    res.json({
+      employee: {
+        id: employee._id,
+        name: employee.user.name,
+        position: employee.position
+      },
+      insights: employee.aiInsights
+    });
+  } catch (error) {
+    console.error('Error generating AI insights:', error);
+    res.status(500).json({ error: 'Failed to generate AI insights' });
+  }
+});
+
+// Employee Feedback & Performance Management
+router.post('/employees/:id/feedback', verifyJWT, isHRorAdmin, async (req, res) => {
+  try {
+    const Feedback = require('../models/Feedback');
+    const Employee = require('../models/Employee');
+    
+    const employee = await Employee.findById(req.params.id);
+    if (!employee) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+
+    const feedback = new Feedback({
+      employee: req.params.id,
+      reviewer: req.user._id,
+      ...req.body,
+      status: 'submitted',
+      submittedAt: new Date()
+    });
+
+    await feedback.save();
+    
+    const populatedFeedback = await Feedback.findById(feedback._id)
+      .populate('reviewer', 'name')
+      .populate('employee', 'user position');
+
+    res.json(populatedFeedback);
+  } catch (error) {
+    console.error('Error creating feedback:', error);
+    res.status(500).json({ error: 'Failed to create feedback' });
+  }
+});
+
+router.post('/employees/:id/performance-review', verifyJWT, isHRorAdmin, async (req, res) => {
+  try {
+    const Employee = require('../models/Employee');
+    
+    const employee = await Employee.findById(req.params.id);
+    if (!employee) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+
+    // Update performance score
+    employee.performanceScore = req.body.performanceScore || employee.performanceScore;
+    await employee.save();
+
+    res.json({ 
+      message: 'Performance review updated successfully',
+      employee: {
+        id: employee._id,
+        performanceScore: employee.performanceScore
+      }
+    });
+  } catch (error) {
+    console.error('Error updating performance review:', error);
+    res.status(500).json({ error: 'Failed to update performance review' });
+  }
+});
+
+// Payroll Management Routes (HR only)
+router.get('/payroll', verifyJWT, isHRorAdmin, getAllPayrolls);
+router.get('/payroll/:id', verifyJWT, isHRorAdmin, getPayrollById);
+router.post('/payroll', verifyJWT, isHRorAdmin, createPayroll);
+router.put('/payroll/:id', verifyJWT, isHRorAdmin, updatePayroll);
+router.put('/payroll/:id/approve', verifyJWT, isHRorAdmin, approvePayroll);
+router.put('/payroll/:id/mark-paid', verifyJWT, isHRorAdmin, markAsPaid);
+router.get('/payroll/stats', verifyJWT, isHRorAdmin, getPayrollStats);
 
 module.exports = router;

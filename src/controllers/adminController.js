@@ -10,12 +10,18 @@ const getAdminStats = async (req, res) => {
   try {
     console.log('📊 Fetching real admin statistics from MongoDB...');
     
+    // Import Employee model
+    const Employee = require('../models/Employee');
+    const Project = require('../models/Project');
+    
     const [
       totalUsers,
       jobsCount, 
       applicationsCount, 
       hrCount, 
-      candidateCount, 
+      candidateCount,
+      employeeCount,
+      projectCount,
       departmentsCount, 
       rolesCount,
       activeJobs,
@@ -34,6 +40,8 @@ const getAdminStats = async (req, res) => {
       Application.countDocuments(),
       User.countDocuments({ role: 'hr' }),
       User.countDocuments({ role: 'candidate' }),
+      Employee.countDocuments({ status: 'active' }),
+      Project.countDocuments(),
       Department.countDocuments(),
       Role.countDocuments(),
       Job.countDocuments({ status: 'active' }),
@@ -72,6 +80,8 @@ const getAdminStats = async (req, res) => {
       applicationsCount,
       hrCount,
       candidateCount,
+      employeeCount, // Real employee count
+      projectCount,  // Real project count
       departmentsCount,
       rolesCount,
       activeJobs,

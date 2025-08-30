@@ -4,6 +4,21 @@ const { verifyJWT, isHRorAdmin } = require('../middleware/auth');
 const { sendEmail } = require('../utils/email');
 const Application = require('../models/Application');
 const User = require('../models/User');
+const {
+  getAllPayrolls,
+  getPayrollById,
+  createPayroll,
+  updatePayroll,
+  approvePayroll,
+  markAsPaid,
+  getPayrollStats
+} = require('../controllers/payrollController');
+const {
+  getAllEmployees,
+  createEmployee,
+  updateEmployee,
+  getEmployeeStats
+} = require('../controllers/employeeController');
 
 // Send message to candidate
 router.post('/send-message', verifyJWT, isHRorAdmin, async (req, res) => {
@@ -259,5 +274,20 @@ router.get('/export-applications', verifyJWT, isHRorAdmin, async (req, res) => {
     res.status(500).json({ error: 'Failed to export applications' });
   }
 });
+
+// Employee Management Routes for HR
+router.get('/employees', verifyJWT, isHRorAdmin, getAllEmployees);
+router.post('/employees', verifyJWT, isHRorAdmin, createEmployee);
+router.put('/employees/:id', verifyJWT, isHRorAdmin, updateEmployee);
+router.get('/employees/stats', verifyJWT, isHRorAdmin, getEmployeeStats);
+
+// Payroll Management Routes for HR
+router.get('/payroll', verifyJWT, isHRorAdmin, getAllPayrolls);
+router.get('/payroll/:id', verifyJWT, isHRorAdmin, getPayrollById);
+router.post('/payroll', verifyJWT, isHRorAdmin, createPayroll);
+router.put('/payroll/:id', verifyJWT, isHRorAdmin, updatePayroll);
+router.put('/payroll/:id/approve', verifyJWT, isHRorAdmin, approvePayroll);
+router.put('/payroll/:id/mark-paid', verifyJWT, isHRorAdmin, markAsPaid);
+router.get('/payroll/stats', verifyJWT, isHRorAdmin, getPayrollStats);
 
 module.exports = router;
