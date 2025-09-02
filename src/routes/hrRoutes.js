@@ -283,11 +283,26 @@ router.get('/employees/stats', verifyJWT, isHRorAdmin, getEmployeeStats);
 
 // Payroll Management Routes for HR
 router.get('/payroll', verifyJWT, isHRorAdmin, getAllPayrolls);
+router.get('/payroll/stats', verifyJWT, isHRorAdmin, getPayrollStats); // Stats route must come before :id route
 router.get('/payroll/:id', verifyJWT, isHRorAdmin, getPayrollById);
 router.post('/payroll', verifyJWT, isHRorAdmin, createPayroll);
 router.put('/payroll/:id', verifyJWT, isHRorAdmin, updatePayroll);
 router.put('/payroll/:id/approve', verifyJWT, isHRorAdmin, approvePayroll);
 router.put('/payroll/:id/mark-paid', verifyJWT, isHRorAdmin, markAsPaid);
-router.get('/payroll/stats', verifyJWT, isHRorAdmin, getPayrollStats);
+
+// Download payslip for a specific payroll record
+router.get('/payroll/:id/download', verifyJWT, isHRorAdmin, async (req, res) => {
+  try {
+    // Forward to the payslip controller
+    const { generatePayslipPDF } = require('../controllers/payslipController');
+    await generatePayslipPDF(req, res);
+  } catch (error) {
+    console.error('❌ Error in HR payslip download endpoint:', error);
+    res.status(500).json({ 
+      message: 'Failed to download payslip',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
 
 module.exports = router;

@@ -246,18 +246,31 @@ const approvePayroll = async (req, res) => {
 // Mark payroll as paid
 const markAsPaid = async (req, res) => {
   try {
+    console.log(`🔍 Marking payroll ${req.params.id} as paid`);
     const payroll = await Payroll.findById(req.params.id);
     
     if (!payroll) {
+      console.error(`❌ Payroll record not found: ${req.params.id}`);
       return res.status(404).json({ message: 'Payroll record not found' });
     }
 
     if (payroll.status !== 'approved') {
+      console.error(`❌ Cannot mark as paid - payroll status is ${payroll.status}`);
       return res.status(400).json({ message: 'Only approved payrolls can be marked as paid' });
     }
 
     const paymentDate = req.body.paymentDate ? new Date(req.body.paymentDate) : new Date();
-    await payroll.markAsPaid(paymentDate);
+    
+    // Update status to 'paid' and set payment date
+    payroll.status = 'paid';
+    payroll.paymentDate = paymentDate;
+    
+    // Use the model's markAsPaid method if it exists, otherwise save directly
+    if (typeof payroll.markAsPaid === 'function') {
+      await payroll.markAsPaid(paymentDate);
+    } else {
+      await payroll.save();
+    }
 
     // Populate the response
     await payroll.populate([

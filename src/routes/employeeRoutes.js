@@ -42,74 +42,178 @@ const cohere = new CohereClient({
 });
 
 // Helper function for AI analysis
-async function generateAIInsights(employee, projects, feedback, okrs) {
+async function generateAIInsights(employee, projects = [], feedback = [], okrs = []) {
+  // Default values for missing data
+  const employeeName = employee?.user?.name || 'Unknown Employee';
+  const position = employee?.position || 'Unspecified Position';
+  const department = employee?.department?.name || 'Unassigned Department';
+  const performanceScore = employee?.performanceScore || 0;
+  const projectContribution = employee?.projectContribution || 0;
+  
   try {
+    console.log(`🤖 Generating AI insights for ${employeeName}`);
+    
+    // Prepare project data with fallbacks
+    const projectSummary = projects.length > 0 
+      ? projects.map(p => `- ${p.name || 'Unnamed Project'}: ${p.status || 'No status'}`).join('\n')
+      : 'No recent projects';
+    
+    // Prepare feedback data with fallbacks
+    const feedbackSummary = feedback.length > 0
+      ? feedback.map(f => `- ${f.type || 'General'}: ${f.overallRating || 'N/A'}/5 - ${f.summary || 'No summary'}`).join('\n')
+      : 'No recent feedback';
+    
+    // Prepare OKR data with fallbacks
+    const okrSummary = okrs.length > 0
+      ? okrs.map(o => `- ${o.objective || 'Unnamed Objective'}: ${o.overallProgress || 0}%`).join('\n')
+      : 'No active OKRs';
+    
     const prompt = `
     Analyze this employee's performance data and provide insights:
     
-    Employee: ${employee.user?.name || 'Unknown'}
-    Position: ${employee.position}
-    Department: ${employee.department?.name || 'Unknown'}
+    Employee: ${employeeName}
+    Position: ${position}
+    Department: ${department}
     
-    Recent Projects: ${projects.length} projects
-    Performance Score: ${employee.performanceScore}%
-    Project Contribution: ${employee.projectContribution}%
+    Recent Projects (${projects.length}):
+    ${projectSummary}
     
-    Recent Feedback Summary:
-    ${feedback.map(f => `- ${f.type}: ${f.overallRating}/5 stars`).join('\n')}
+    Performance Metrics:
+    - Performance Score: ${performanceScore}%
+    - Project Contribution: ${projectContribution}%
     
-    Current OKRs Progress:
-    ${okrs.map(o => `- ${o.objective}: ${o.overallProgress}% complete`).join('\n')}
+    Recent Feedback:
+    ${feedbackSummary}
     
-    Please provide:
-    1. Promotion readiness score (0-100) and reasons
-    2. Attrition risk score (0-100) and factors
-    3. Top 3 strengths
-    4. Top 3 improvement areas
+    Current OKRs:
+    ${okrSummary}
     
-    Format as JSON with keys: promotionReadiness, attritionRisk, strengths, improvementAreas
+    Please provide a JSON response with the following structure:
+    {
+      "promotionReadiness": {
+        "score": 0-100,
+        "reasons": ["reason1", "reason2"],
+        "nextSteps": ["action1", "action2"]
+      },
+      "attritionRisk": {
+        "score": 0-100,
+        "factors": ["factor1", "factor2"],
+        "mitigation": ["action1", "action2"]
+      },
+      "strengths": ["strength1", "strength2", "strength3"],
+      "improvementAreas": ["area1", "area2", "area3"],
+      "recommendations": ["recommendation1", "recommendation2"]
+    }
     `;
 
+    console.log('📝 Sending prompt to AI model...');
     const response = await cohere.generate({
       model: 'command',
       prompt: prompt,
-      maxTokens: 500,
-      temperature: 0.3,
+      maxTokens: 1000,
+      temperature: 0.5,
+      k: 0,
+      p: 0.9,
+      frequencyPenalty: 0.5,
+      presencePenalty: 0.5,
+      stopSequences: ['---'],
+      returnLikelihoods: 'NONE'
     });
 
+    console.log('✅ Received AI response, processing...');
+    
     try {
-      return JSON.parse(response.generations[0].text);
-    } catch (parseError) {
-      // Fallback if JSON parsing fails
+      // Extract JSON from the response
+      const jsonMatch = response.generations[0].text.match(/\{[\s\S]*\}/);
+      const jsonString = jsonMatch ? jsonMatch[0] : response.generations[0].text;
+      const insights = JSON.parse(jsonString);
+      
+      // Validate and format the response
       return {
         promotionReadiness: {
-          score: Math.min(employee.performanceScore + 10, 100),
-          reasons: ['Strong performance metrics', 'Consistent project delivery']
+          score: Math.min(Math.max(insights.promotionReadiness?.score || 50, 0), 100),
+          reasons: Array.isArray(insights.promotionReadiness?.reasons) 
+            ? insights.promotionReadiness.reasons 
+            : ['Not enough data for assessment'],
+          nextSteps: Array.isArray(insights.promotionReadiness?.nextSteps)
+            ? insights.promotionReadiness.nextSteps
+            : []
         },
         attritionRisk: {
-          score: Math.max(100 - employee.performanceScore - 20, 0),
-          factors: ['Performance tracking needed', 'Engagement monitoring required']
+          score: Math.min(Math.max(insights.attritionRisk?.score || 30, 0), 100),
+          factors: Array.isArray(insights.attritionRisk?.factors)
+            ? insights.attritionRisk.factors
+            : ['Insufficient data for assessment'],
+          mitigation: Array.isArray(insights.attritionRisk?.mitigation)
+            ? insights.attritionRisk.mitigation
+            : []
         },
-        strengths: ['Technical skills', 'Project execution', 'Team collaboration'],
-        improvementAreas: ['Communication', 'Leadership development', 'Time management']
+        strengths: Array.isArray(insights.strengths) && insights.strengths.length > 0
+          ? insights.strengths.slice(0, 3)
+          : ['Team collaboration', 'Adaptability', 'Willingness to learn'],
+        improvementAreas: Array.isArray(insights.improvementAreas) && insights.improvementAreas.length > 0
+          ? insights.improvementAreas.slice(0, 3)
+          : ['Skill development', 'Time management', 'Communication'],
+        recommendations: Array.isArray(insights.recommendations) && insights.recommendations.length > 0
+          ? insights.recommendations
+          : [
+              'Schedule regular 1:1 meetings to discuss career development',
+              'Consider additional training in key skill areas'
+            ]
       };
+      
+    } catch (parseError) {
+      console.error('⚠️ Error parsing AI response, using fallback insights:', parseError);
+      return getFallbackInsights(employee);
     }
   } catch (error) {
-    console.error('AI analysis error:', error);
-    // Return fallback insights
-    return {
-      promotionReadiness: {
-        score: employee.performanceScore || 50,
-        reasons: ['Performance evaluation needed']
-      },
-      attritionRisk: {
-        score: 30,
-        factors: ['Regular check-ins recommended']
-      },
-      strengths: ['Professional development', 'Team contribution'],
-      improvementAreas: ['Skill enhancement', 'Goal setting']
-    };
+    console.error('❌ AI analysis error, using fallback insights:', error);
+    return getFallbackInsights(employee);
   }
+}
+
+// Helper function to generate fallback insights
+function getFallbackInsights(employee) {
+  const performanceScore = employee?.performanceScore || 50;
+  const projectContribution = employee?.projectContribution || 0;
+  
+  return {
+    promotionReadiness: {
+      score: Math.min(performanceScore + 10, 100),
+      reasons: performanceScore > 70 
+        ? ['Consistently meets performance expectations']
+        : ['Performance evaluation needed'],
+      nextSteps: [
+        'Review performance metrics with manager',
+        'Set clear development goals'
+      ]
+    },
+    attritionRisk: {
+      score: Math.max(100 - performanceScore - 20, 0),
+      factors: performanceScore < 50 
+        ? ['Performance concerns identified'] 
+        : ['Regular check-ins recommended'],
+      mitigation: [
+        'Schedule career development discussion',
+        'Review workload and work-life balance'
+      ]
+    },
+    strengths: [
+      'Team collaboration',
+      'Problem-solving skills',
+      'Adaptability'
+    ],
+    improvementAreas: [
+      'Technical skill development',
+      'Time management',
+      'Cross-functional communication'
+    ],
+    recommendations: [
+      'Participate in skill development workshops',
+      'Seek mentorship opportunities',
+      'Set clear quarterly objectives'
+    ]
+  };
 }
 
 // Get current user's employee profile
@@ -134,66 +238,212 @@ router.get('/me', verifyJWT, async (req, res) => {
 // Get current user's payroll records
 router.get('/me/payroll', verifyJWT, async (req, res) => {
   try {
-    const employee = await Employee.findOne({ user: req.user._id });
+    console.log(`🔍 Fetching payroll records for user: ${req.user._id}`);
+    
+    // Find employee with basic validation
+    const employee = await Employee.findOne({ 
+      user: req.user._id,
+      status: 'active'
+    });
+    
     if (!employee) {
-      return res.status(404).json({ message: 'Employee profile not found' });
+      console.error(`❌ Active employee profile not found for user: ${req.user._id}`);
+      return res.status(404).json({ 
+        message: 'Employee profile not found or inactive',
+        code: 'EMPLOYEE_NOT_FOUND'
+      });
     }
 
     const Payroll = require('../models/Payroll');
-    const payrolls = await Payroll.find({ employee: employee._id })
+    
+    // Get payroll records with proper population and error handling
+    let payrolls = [];
+    try {
+      payrolls = await Payroll.find({ 
+        employee: employee._id,
+        status: { $in: ['approved', 'paid'] } // Only show approved/paid records
+      })
       .populate({
         path: 'employee',
+        select: 'user position',
         populate: {
           path: 'user',
-          select: 'name email'
+          select: 'name email',
+          match: { isActive: true }
         }
       })
-      .populate('approvedBy', 'name email')
-      .sort({ year: -1, month: -1 });
+      .populate({
+        path: 'approvedBy',
+        select: 'name email',
+        match: { isActive: true }
+      })
+      .sort({ year: -1, month: -1 })
+      .lean();
+      
+      // Ensure consistent data structure
+      payrolls = payrolls.map(payroll => ({
+        ...payroll,
+        employee: payroll.employee ? {
+          ...payroll.employee,
+          user: payroll.employee.user || { name: 'Unknown', email: 'unknown@example.com' }
+        } : null,
+        approvedBy: payroll.approvedBy || null
+      }));
+      
+      console.log(`✅ Found ${payrolls.length} payroll records for employee: ${employee._id}`);
+      
+    } catch (error) {
+      console.error('⚠️ Error fetching payroll records:', error);
+      // Continue with empty array to avoid breaking the UI
+      payrolls = [];
+    }
 
     res.json(payrolls);
   } catch (error) {
-    console.error('Error fetching employee payroll:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    console.error('❌ Error in payroll endpoint:', error);
+    res.status(500).json({ 
+      message: 'Failed to fetch payroll records',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+      code: 'PAYROLL_FETCH_ERROR'
+    });
   }
 });
 
 // Get current user's specific payroll record
 router.get('/me/payroll/:id', verifyJWT, async (req, res) => {
   try {
-    const employee = await Employee.findOne({ user: req.user._id });
+    console.log(`🔍 Fetching payroll record ${req.params.id} for user: ${req.user._id}`);
+    
+    // Validate payroll ID format
+    if (!req.params.id.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({
+        message: 'Invalid payroll ID format',
+        code: 'INVALID_PAYROLL_ID'
+      });
+    }
+    
+    // Find employee with basic validation
+    const employee = await Employee.findOne({ 
+      user: req.user._id,
+      status: 'active'
+    });
+    
     if (!employee) {
-      return res.status(404).json({ message: 'Employee profile not found' });
+      console.error(`❌ Active employee profile not found for user: ${req.user._id}`);
+      return res.status(404).json({ 
+        message: 'Employee profile not found or inactive',
+        code: 'EMPLOYEE_NOT_FOUND'
+      });
     }
 
     const Payroll = require('../models/Payroll');
-    const payroll = await Payroll.findOne({ 
-      _id: req.params.id, 
-      employee: employee._id 
-    })
+    
+    // Get payroll record with proper population and error handling
+    try {
+      const payroll = await Payroll.findOne({ 
+        _id: req.params.id, 
+        employee: employee._id,
+        status: { $in: ['approved', 'paid'] } // Only show approved/paid records
+      })
       .populate({
         path: 'employee',
-        populate: {
-          path: 'user',
-          select: 'name email'
-        }
+        select: 'user position department',
+        populate: [
+          {
+            path: 'user',
+            select: 'name email',
+            match: { isActive: true }
+          },
+          {
+            path: 'department',
+            select: 'name',
+            match: { isActive: true }
+          }
+        ]
       })
-      .populate('approvedBy', 'name email');
+      .populate({
+        path: 'approvedBy',
+        select: 'name email',
+        match: { isActive: true }
+      })
+      .lean();
 
-    if (!payroll) {
-      return res.status(404).json({ message: 'Payroll record not found' });
+      if (!payroll) {
+        console.error(`❌ Payroll record not found or unauthorized: ${req.params.id}`);
+        return res.status(404).json({ 
+          message: 'Payroll record not found or access denied',
+          code: 'PAYROLL_NOT_FOUND'
+        });
+      }
+      
+      // Ensure consistent data structure
+      const formattedPayroll = {
+        ...payroll,
+        employee: payroll.employee ? {
+          ...payroll.employee,
+          user: payroll.employee.user || { name: 'Unknown', email: 'unknown@example.com' },
+          department: payroll.employee.department || { name: 'Unassigned' }
+        } : null,
+        approvedBy: payroll.approvedBy || null,
+        // Ensure all required fields have default values
+        basicSalary: payroll.basicSalary || 0,
+        allowances: payroll.allowances || [],
+        deductions: payroll.deductions || [],
+        netSalary: payroll.netSalary || 0,
+        paymentDate: payroll.paymentDate || null,
+        paymentMethod: payroll.paymentMethod || 'bank_transfer',
+        status: payroll.status || 'draft',
+        notes: payroll.notes || ''
+      };
+      
+      console.log(`✅ Found payroll record: ${req.params.id} for employee: ${employee._id}`);
+      res.json(formattedPayroll);
+      
+    } catch (dbError) {
+      console.error('⚠️ Database error fetching payroll:', dbError);
+      throw dbError; // Will be caught by the outer catch
     }
-
-    res.json(payroll);
+    
   } catch (error) {
-    console.error('Error fetching payroll details:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    console.error('❌ Error in payroll details endpoint:', error);
+    
+    // Handle specific error types
+    if (error.name === 'CastError') {
+      return res.status(400).json({
+        message: 'Invalid payroll ID format',
+        code: 'INVALID_PAYROLL_ID'
+      });
+    }
+    
+    res.status(500).json({ 
+      message: 'Failed to fetch payroll details',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+      code: 'PAYROLL_DETAILS_ERROR'
+    });
+  }
+});
+
+// Download payslip for current user's specific payroll record
+router.get('/me/payroll/:id/download', verifyJWT, async (req, res) => {
+  try {
+    // Forward to the payslip controller
+    const { generatePayslipPDF } = require('../controllers/payslipController');
+    await generatePayslipPDF(req, res);
+  } catch (error) {
+    console.error('❌ Error in payslip download endpoint:', error);
+    res.status(500).json({ 
+      message: 'Failed to download payslip',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+      code: 'PAYSLIP_DOWNLOAD_ERROR'
+    });
   }
 });
 
 // Get current user's projects
 router.get('/me/projects', verifyJWT, async (req, res) => {
   try {
+    console.log(`🔍 Fetching projects for current user: ${req.user._id}`);
+    
     const employee = await Employee.findOne({ user: req.user._id });
     
     if (!employee) {
@@ -201,12 +451,54 @@ router.get('/me/projects', verifyJWT, async (req, res) => {
     }
 
     const projects = await Project.find({
-      'teamMembers.employee': employee._id
+      'teamMembers.employee': employee._id,
+      status: { $ne: 'archived' } // Don't show archived projects
     })
-      .populate('projectManager', 'user position')
+      .populate({
+        path: 'projectManager',
+        select: 'user position',
+        populate: {
+          path: 'user',
+          select: 'name'
+        }
+      })
       .sort({ startDate: -1 });
 
-    res.json({ projects });
+    console.log(`✅ Found ${projects.length} projects for employee`);
+    
+    // Get milestones for each project
+    const projectsWithMilestones = await Promise.all(
+      projects.map(async (project) => {
+        const milestones = await Milestone.find({ 
+          project: project._id,
+          assignedTo: employee._id 
+        }).sort({ dueDate: 1 });
+        
+        const teamMember = project.teamMembers.find(
+          member => member.employee.toString() === employee._id.toString()
+        );
+        
+        // Include all necessary project details
+        return {
+          _id: project._id,
+          name: project.name,
+          description: project.description,
+          status: project.status,
+          priority: project.priority,
+          startDate: project.startDate,
+          endDate: project.endDate,
+          estimatedEndDate: project.estimatedEndDate,
+          completionPercentage: project.completionPercentage,
+          role: teamMember?.role || 'team-member',
+          contributionPercentage: teamMember?.contributionPercentage || 0,
+          hoursWorked: teamMember?.hoursWorked || 0,
+          projectManager: project.projectManager,
+          milestones
+        };
+      })
+    );
+
+    res.json({ projects: projectsWithMilestones });
   } catch (error) {
     console.error('Error fetching employee projects:', error);
     res.status(500).json({ error: 'Failed to fetch employee projects' });
@@ -265,11 +557,23 @@ router.post('/me/request-feedback', verifyJWT, async (req, res) => {
 // Get employee's projects
 router.get('/:id/projects', verifyJWT, async (req, res) => {
   try {
+    console.log(`🔍 Fetching projects for employee ID: ${req.params.id}`);
+    
     const projects = await Project.find({
-      'teamMembers.employee': req.params.id
+      'teamMembers.employee': req.params.id,
+      status: { $ne: 'archived' } // Don't show archived projects
     })
-      .populate('projectManager', 'user position')
+      .populate({
+        path: 'projectManager',
+        select: 'user position',
+        populate: {
+          path: 'user',
+          select: 'name'
+        }
+      })
       .sort({ startDate: -1 });
+    
+    console.log(`✅ Found ${projects.length} projects for employee`);
     
     // Get milestones for each project
     const projectsWithMilestones = await Promise.all(
@@ -283,11 +587,21 @@ router.get('/:id/projects', verifyJWT, async (req, res) => {
           member => member.employee.toString() === req.params.id
         );
         
+        // Include all necessary project details
         return {
-          ...project.toObject(),
+          _id: project._id,
+          name: project.name,
+          description: project.description,
+          status: project.status,
+          priority: project.priority,
+          startDate: project.startDate,
+          endDate: project.endDate,
+          estimatedEndDate: project.estimatedEndDate,
+          completionPercentage: project.completionPercentage,
           role: teamMember?.role || 'team-member',
           contributionPercentage: teamMember?.contributionPercentage || 0,
           hoursWorked: teamMember?.hoursWorked || 0,
+          projectManager: project.projectManager,
           milestones
         };
       })
@@ -333,58 +647,138 @@ router.get('/', verifyJWT, async (req, res) => {
 // Get employee profile and timeline
 router.get('/:id/profile', verifyJWT, async (req, res) => {
   try {
+    console.log(`🔍 Fetching profile for employee ID: ${req.params.id}`);
+    
+    // Find employee with all necessary population
     const employee = await Employee.findById(req.params.id)
-      .populate('user', 'name email')
+      .populate({
+        path: 'user',
+        select: 'name email',
+        match: { isActive: true } // Only include active users
+      })
       .populate('department', 'name')
-      .populate('manager', 'user position');
+      .populate({
+        path: 'manager',
+        select: 'user position',
+        populate: {
+          path: 'user',
+          select: 'name email',
+          match: { isActive: true }
+        }
+      });
     
     if (!employee) {
+      console.error(`❌ Employee not found with ID: ${req.params.id}`);
       return res.status(404).json({ error: 'Employee not found' });
     }
     
-    // Get projects timeline
-    const projects = await Project.find({
-      'teamMembers.employee': employee._id
-    })
-      .populate('projectManager', 'user')
-      .sort({ startDate: -1 })
-      .limit(10);
+    // Check if user is populated
+    if (!employee.user) {
+      console.error(`❌ User not found for employee ID: ${req.params.id}`);
+      return res.status(404).json({ error: 'User account not found or inactive' });
+    }
     
-    // Get milestones
-    const milestones = await Milestone.find({
-      assignedTo: employee._id
-    })
+    console.log(`✅ Found employee: ${employee.user.name} (${employee.user.email})`);
+    
+    // Get projects timeline with error handling
+    let projects = [];
+    try {
+      projects = await Project.find({
+        'teamMembers.employee': employee._id,
+        status: { $ne: 'archived' }
+      })
+      .populate({
+        path: 'projectManager',
+        select: 'user',
+        populate: {
+          path: 'user',
+          select: 'name',
+          match: { isActive: true }
+        }
+      })
+      .sort({ startDate: -1 })
+      .limit(10)
+      .lean();
+    } catch (projectError) {
+      console.error('⚠️ Error fetching projects:', projectError);
+      // Continue with empty projects array
+    }
+    
+    // Get milestones with error handling
+    let milestones = [];
+    try {
+      milestones = await Milestone.find({
+        assignedTo: employee._id,
+        status: { $ne: 'completed' }
+      })
       .populate('project', 'name')
       .sort({ dueDate: -1 })
-      .limit(20);
+      .limit(20)
+      .lean();
+    } catch (milestoneError) {
+      console.error('⚠️ Error fetching milestones:', milestoneError);
+      // Continue with empty milestones array
+    }
     
-    // Get recent feedback
-    const feedback = await Feedback.find({
-      employee: employee._id,
-      status: { $in: ['submitted', 'reviewed'] }
-    })
-      .populate('reviewer', 'name')
+    // Get recent feedback with error handling
+    let feedback = [];
+    try {
+      feedback = await Feedback.find({
+        employee: employee._id,
+        status: { $in: ['submitted', 'reviewed'] }
+      })
+      .populate({
+        path: 'reviewer',
+        select: 'name',
+        match: { isActive: true }
+      })
       .populate('project', 'name')
       .sort({ createdAt: -1 })
-      .limit(10);
+      .limit(10)
+      .lean();
+    } catch (feedbackError) {
+      console.error('⚠️ Error fetching feedback:', feedbackError);
+      // Continue with empty feedback array
+    }
     
-    // Get current OKRs
-    const currentYear = new Date().getFullYear();
-    const okrs = await OKR.find({
-      employee: employee._id,
-      year: currentYear,
-      status: 'active'
-    });
+    // Get current OKRs with error handling
+    let okrs = [];
+    try {
+      const currentYear = new Date().getFullYear();
+      okrs = await OKR.find({
+        employee: employee._id,
+        year: currentYear,
+        status: 'active'
+      }).lean();
+    } catch (okrError) {
+      console.error('⚠️ Error fetching OKRs:', okrError);
+      // Continue with empty OKRs array
+    }
     
-    res.json({
-      employee,
+    // Ensure all data is properly formatted
+    const response = {
+      employee: {
+        ...employee.toObject(),
+        // Ensure user data is always available
+        user: employee.user || { name: 'Unknown', email: 'unknown@example.com' },
+        // Ensure department is always an object with at least a name
+        department: employee.department || { name: 'Unassigned' },
+        // Ensure manager is properly formatted
+        manager: employee.manager ? {
+          ...employee.manager.toObject(),
+          user: employee.manager.user || { name: 'Unassigned' }
+        } : null
+      },
       timeline: {
-        projects,
-        milestones,
-        feedback,
-        okrs
+        projects: projects || [],
+        milestones: milestones || [],
+        feedback: feedback || [],
+        okrs: okrs || []
       }
-    });
+    };
+    
+    console.log(`✅ Successfully built profile response for employee: ${employee.user.name}`);
+    res.json(response);
   } catch (error) {
     console.error('Error fetching employee profile:', error);
     res.status(500).json({ error: 'Failed to fetch employee profile' });

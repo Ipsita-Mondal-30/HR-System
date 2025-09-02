@@ -168,7 +168,7 @@ Respond in the format:
         tags = [];
       }
     }
-    
+
     // Step 6: Final Response
     res.json({
       matchScore: finalScore,
@@ -185,4 +185,42 @@ Respond in the format:
   }
 };
 
-module.exports = { getMatchScore };
+// General AI text generation function
+const generateResponse = async (req, res) => {
+  try {
+    const { prompt } = req.body;
+    
+    if (!prompt) {
+      return res.status(400).json({ error: 'Prompt is required' });
+    }
+
+    console.log('🤖 Generating AI response for prompt length:', prompt.length);
+
+    // Use Cohere for text generation
+    const cohereResponse = await cohere.chat({
+      model: "command-r",
+      message: prompt,
+      temperature: 0.7,
+      max_tokens: 1000
+    });
+
+    console.log('✅ AI response generated successfully');
+    
+    res.json({
+      response: cohereResponse.text,
+      generatedAt: new Date().toISOString()
+    });
+
+  } catch (err) {
+    console.error("🔥 AI Generation Error:", err.message);
+    
+    // Provide a fallback response
+    res.json({
+      response: "AI service temporarily unavailable. Please try again later.",
+      error: true,
+      generatedAt: new Date().toISOString()
+    });
+  }
+};
+
+module.exports = { getMatchScore, generateResponse };
