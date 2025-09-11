@@ -66,3 +66,25 @@ exports.isHRorAdmin = (req, res, next) => {
   if (['hr', 'admin'].includes(req.user?.role)) return next();
   res.status(403).json({ message: "HR/Admin only" });
 };
+
+// Generic auth token verification (alias for verifyJWT)
+exports.authenticateToken = exports.verifyJWT;
+
+// Role requirement middleware
+exports.requireRole = (roles) => {
+  return (req, res, next) => {
+    console.log('🔍 Checking role requirement. Required:', roles, 'User role:', req.user?.role);
+    
+    if (!req.user) {
+      return res.status(401).json({ message: "Authentication required" });
+    }
+    
+    if (roles.includes(req.user.role)) {
+      console.log('✅ Role requirement satisfied');
+      return next();
+    }
+    
+    console.log('❌ Role requirement not met');
+    res.status(403).json({ message: `Access denied. Required roles: ${roles.join(', ')}` });
+  };
+};
