@@ -1,13 +1,15 @@
-// passport.js
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const User = require('../models/User');
 const mongoose = require('mongoose');
 
+// ✅ Load BASE_URL from .env
+const BASE_URL = process.env.BASE_URL || "http://localhost:8080";
+
 passport.use(new GoogleStrategy({
   clientID: process.env.GOOGLE_CLIENT_ID,
   clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-  callbackURL: `${BASE_URL}/api/auth/google/callback`,
+  callbackURL: `${BASE_URL}/api/auth/google/callback`, // ✅ works now
 },
 async (accessToken, refreshToken, profile, done) => {
   try {
@@ -17,6 +19,9 @@ async (accessToken, refreshToken, profile, done) => {
       emails: profile.emails,
       name: profile.name
     });
+
+    // --- rest of your logic unchanged ---
+
 
     // Ensure database connection
     if (mongoose.connection.readyState !== 1) {

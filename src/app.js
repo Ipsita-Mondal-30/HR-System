@@ -92,6 +92,10 @@ app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
   next();
 });
+app.get("/", (req, res) => {
+  res.send("Backend is running 🚀");
+});
+
 
 // Health/test endpoint
 app.get('/api/test', (req, res) => {
