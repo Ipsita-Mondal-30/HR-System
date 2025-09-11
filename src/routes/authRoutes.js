@@ -69,71 +69,53 @@ router.get('/google', passport.authenticate('google', {
 // --- Google OAuth callback ---
 router.get('/google/callback', (req, res, next) => {
   passport.authenticate('google', { session: false }, (err, user, info) => {
+    const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
+
     if (err) {
       console.error('❌ OAuth authentication error:', err);
-      return res.redirect(`http://localhost:3000/login?error=oauth_failed&message=${encodeURIComponent(err.message)}`);
+      return res.redirect(`${FRONTEND_URL}/login?error=oauth_failed&message=${encodeURIComponent(err.message)}`);
     }
     
     if (!user) {
       console.error('❌ OAuth failed - no user returned');
-      return res.redirect(`http://localhost:3000/login?error=oauth_failed&message=${encodeURIComponent('Authentication failed')}`);
+      return res.redirect(`${FRONTEND_URL}/login?error=oauth_failed&message=${encodeURIComponent('Authentication failed')}`);
     }
 
     try {
-      console.log('🔐 OAuth callback - User data:', {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role
-      });
-      
       const token = jwt.sign(
-        {
-          _id: user._id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-        },
+        { _id: user._id, name: user.name, email: user.email, role: user.role },
         process.env.JWT_SECRET,
         { expiresIn: '7d' }
       );
-      
-      console.log('✅ JWT token generated successfully');
 
-      // Set cookie with token
+      // Set cookie
       res.cookie('auth_token', token, {
-        httpOnly: false, // Allow client-side access
+        httpOnly: false,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax',
-        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+        maxAge: 7 * 24 * 60 * 60 * 1000
       });
 
-      // Direct redirect based on role to avoid callback page issues
+      // Redirect to correct frontend URL
       if (!user.role) {
-        console.log('🔄 User has no role, redirecting to role selection');
-        res.redirect(`http://localhost:3000/role-select?token=${token}`);
-      } else {
-        console.log(`🎯 User has role: ${user.role}, redirecting to dashboard`);
-        switch (user.role) {
-          case 'admin':
-            res.redirect(`http://localhost:3000/admin/dashboard?token=${token}`);
-            break;
-          case 'hr':
-            res.redirect(`http://localhost:3000/hr/dashboard?token=${token}`);
-            break;
-          case 'candidate':
-            res.redirect(`http://localhost:3000/candidate/dashboard?token=${token}`);
-            break;
-          case 'employee':
-            res.redirect(`http://localhost:3000/employee/dashboard?token=${token}`);
-            break;
-          default:
-            res.redirect(`http://localhost:3000/?token=${token}`);
-        }
+        return res.redirect(`${FRONTEND_URL}/role-select?token=${token}`);
+      }
+
+      switch (user.role) {
+        case 'admin':
+          return res.redirect(`${FRONTEND_URL}/admin/dashboard?token=${token}`);
+        case 'hr':
+          return res.redirect(`${FRONTEND_URL}/hr/dashboard?token=${token}`);
+        case 'candidate':
+          return res.redirect(`${FRONTEND_URL}/candidate/dashboard?token=${token}`);
+        case 'employee':
+          return res.redirect(`${FRONTEND_URL}/employee/dashboard?token=${token}`);
+        default:
+          return res.redirect(`${FRONTEND_URL}/?token=${token}`);
       }
     } catch (tokenError) {
       console.error('❌ Token generation error:', tokenError);
-      res.redirect(`http://localhost:3000/login?error=token_failed&message=${encodeURIComponent('Failed to generate authentication token')}`);
+      res.redirect(`${FRONTEND_URL}/login?error=token_failed&message=${encodeURIComponent('Failed to generate authentication token')}`);
     }
   })(req, res, next);
 });

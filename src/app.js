@@ -11,30 +11,52 @@ const cookieParser = require('cookie-parser');
 // Load environment variables early
 dotenv.config();
 
+const {
+  PORT = 8080,
+  MONGODB_URI,
+  SESSION_SECRET,
+  CORS_ORIGIN,
+  BASE_URL = `http://localhost:${PORT}`,
+  FRONTEND_URL,
+  GOOGLE_CLIENT_ID,
+  GOOGLE_CLIENT_SECRET
+} = process.env;
+
 // Validate critical envs
-if (!process.env.MONGODB_URI) {
-  console.warn('⚠️ MONGODB_URI is missing in environment');
-}
-if (!process.env.SESSION_SECRET) {
-  console.warn('⚠️ SESSION_SECRET is missing in environment');
-}
+if (!MONGODB_URI) console.warn('⚠️ MONGODB_URI is missing in environment');
+if (!SESSION_SECRET) console.warn('⚠️ SESSION_SECRET is missing in environment');
 
 const app = express();
 
-// Show brief connection string (safe preview)
-console.log('🌐 MongoDB URI loaded:', process.env.MONGODB_URI ? 'Yes' : 'No');
-if (process.env.MONGODB_URI) {
-  console.log('🔗 Connection preview:', process.env.MONGODB_URI.slice(0, 50) + '...');
+// MongoDB preview
+console.log('🌐 MongoDB URI loaded:', MONGODB_URI ? 'Yes' : 'No');
+if (MONGODB_URI) {
+  console.log('🔗 Connection preview:', MONGODB_URI.slice(0, 50) + '...');
 }
 
 // Middlewares (order matters)
-// Cookies before session
 app.use(cookieParser());
 
-// CORS
+// --- Dynamic & Secure CORS ---
+const allowedOrigins = [
+  ...(CORS_ORIGIN ? CORS_ORIGIN.split(',').map(o => o.trim()) : []),
+  FRONTEND_URL
+].filter(Boolean);
+
+console.log('✅ Allowed CORS origins:', allowedOrigins);
+
 app.use(
   cors({
-    origin: 'http://localhost:3000',
+    origin: function (origin, callback) {
+      // Allow requests with no origin (mobile apps, curl, etc.)
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      } else {
+        console.warn('❌ CORS blocked for origin:', origin);
+        return callback(new Error('Not allowed by CORS'));
+      }
+    },
     credentials: true,
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -42,31 +64,26 @@ app.use(
   })
 );
 
-// Body parsing
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Session
 app.use(
   expressSession({
-    secret: process.env.SESSION_SECRET || 'change_me',
+    secret: SESSION_SECRET || 'change_me',
     resave: false,
     saveUninitialized: false,
     cookie: {
-      secure: false,       // set true only behind HTTPS proxy
-      httpOnly: true,      // safer: prevents JS access to session cookie
-      sameSite: 'lax',     // good default for local dev with cross-site redirects
+      secure: process.env.NODE_ENV === 'production',
+      httpOnly: true,
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
       maxAge: 24 * 60 * 60 * 1000,
     },
   })
 );
 
-// IMPORTANT: Passport config path from root-level server.js
-require('./config/passport'); // <-- if your file is src/config/passport.js
-// If your file is at config/passport.js (root/config), use this instead:
-// require('./config/passport');
-
 // Passport
+require('./config/passport');
 app.use(passport.initialize());
 app.use(passport.session());
 
@@ -76,7 +93,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Health/test endpoint USED by frontend probe
+// Health/test endpoint
 app.get('/api/test', (req, res) => {
   res.json({
     message: 'HR Server Running!',
@@ -84,14 +101,6 @@ app.get('/api/test', (req, res) => {
     database: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected',
     dbName: mongoose.connection.db ? mongoose.connection.db.databaseName : 'Not connected',
   });
-});
-
-// Basic me endpoint (optional)
-app.get('/me', (req, res) => {
-  if (req.isAuthenticated && req.isAuthenticated()) {
-    return res.json(req.user);
-  }
-  return res.status(401).json({ error: 'Not logged in' });
 });
 
 // Authenticated current user payload
@@ -103,38 +112,23 @@ app.get('/api/me', (req, res) => {
   return res.status(401).json({ error: 'Not authenticated' });
 });
 
-// Routes (server.js at root imports src/*)
-const authRoutes = require('./routes/authRoutes');
-app.use('/api/auth', authRoutes);
-
-const jobRoutes = require('./routes/jobRoutes');
-app.use('/api/jobs', jobRoutes);
-
-const departmentRoutes = require('./routes/departmentRoutes');
-app.use('/api/departments', departmentRoutes);
-
-const roleRoutes = require('./routes/roleRoutes');
-app.use('/api/roles', roleRoutes);
-
-const applicationRoutes = require('./routes/applicationRoutes');
-app.use('/api/applications', applicationRoutes);
-
-const interviewRoutes = require('./routes/interviewRoutes');
-app.use('/api/interviews', interviewRoutes);
-
+// Routes
+app.use('/api/auth', require('./routes/authRoutes'));
+app.use('/api/jobs', require('./routes/jobRoutes'));
+app.use('/api/departments', require('./routes/departmentRoutes'));
+app.use('/api/roles', require('./routes/roleRoutes'));
+app.use('/api/applications', require('./routes/applicationRoutes'));
+app.use('/api/interviews', require('./routes/interviewRoutes'));
 app.use('/api/admin', require('./routes/adminRoutes'));
 app.use('/api/users', require('./routes/userRoutes'));
 app.use('/api/candidate', require('./routes/candidateRoutes'));
 app.use('/api/hr', require('./routes/hrRoutes'));
-
-// New employee performance system routes
 app.use('/api/employees', require('./routes/employeeRoutes'));
 app.use('/api/projects', require('./routes/projectRoutes'));
 app.use('/api/feedback', require('./routes/feedbackRoutes'));
 app.use('/api/okrs', require('./routes/okrRoutes'));
 
-
-// Debug users endpoint (safe)
+// Debug users endpoint
 app.get('/api/debug/users', async (req, res) => {
   try {
     const User = require('./models/User');
@@ -151,16 +145,12 @@ app.get('/api/debug/users', async (req, res) => {
   }
 });
 
-// Seed employee data endpoint
+// Seed employees
 app.post('/api/debug/seed-employees', async (req, res) => {
   try {
     const { seedEmployeeData } = require('./utils/seedEmployeeData');
     const result = await seedEmployeeData();
-    res.json({
-      success: true,
-      message: 'Employee data seeded successfully',
-      data: result
-    });
+    res.json({ success: true, message: 'Employee data seeded successfully', data: result });
   } catch (err) {
     console.error('Seed employee data error:', err);
     res.status(500).json({ error: err.message });
@@ -171,10 +161,10 @@ app.post('/api/debug/seed-employees', async (req, res) => {
 app.get('/api/oauth-test', (req, res) => {
   res.json({
     message: 'OAuth routes are accessible',
-    googleClientId: process.env.GOOGLE_CLIENT_ID ? 'Set' : 'Missing',
-    googleClientSecret: process.env.GOOGLE_CLIENT_SECRET ? 'Set' : 'Missing',
-    oauthUrl: 'http://localhost:8080/api/auth/google',
-    callbackUrl: 'http://localhost:8080/api/auth/google/callback',
+    googleClientId: GOOGLE_CLIENT_ID ? 'Set' : 'Missing',
+    googleClientSecret: GOOGLE_CLIENT_SECRET ? 'Set' : 'Missing',
+    oauthUrl: `${BASE_URL}/api/auth/google`,
+    callbackUrl: `${BASE_URL}/api/auth/google/callback`,
     timestamp: new Date().toISOString()
   });
 });
@@ -188,12 +178,8 @@ app.get('/health', (req, res) => {
   });
 });
 
-// 404 LAST
-app.use((req, res) => {
-  res.status(404).json({ error: `Route not found: ${req.method} ${req.url}` });
-});
-
-// Error handler LAST
+// 404 + Error handler
+app.use((req, res) => res.status(404).json({ error: `Route not found: ${req.method} ${req.url}` }));
 app.use((err, req, res, next) => {
   console.error('Global error:', err);
   res.status(500).json({ error: err.message || 'Internal Server Error' });
@@ -205,7 +191,7 @@ async function startServer() {
     console.log('🚀 Starting HR Server...\n');
 
     console.log('🌐 Connecting to MongoDB...');
-    await mongoose.connect(process.env.MONGODB_URI, {
+    await mongoose.connect(MONGODB_URI, {
       serverSelectionTimeoutMS: 15000,
       socketTimeoutMS: 45000,
     });
@@ -213,36 +199,18 @@ async function startServer() {
     console.log('✅ Connected to MongoDB successfully!');
     console.log('📊 Database name:', mongoose.connection.db.databaseName);
 
-    // Optional visibility: existing users
     const User = require('./models/User');
     const userCount = await User.countDocuments();
     console.log(`👥 Found ${userCount} users in database`);
-    if (userCount > 0) {
-      const users = await User.find().select('name email role googleId');
-      users.forEach((u) => {
-        console.log(`   👤 ${u.name} (${u.email}) - ${u.role || 'No role'}`);
-      });
-    } else {
-      console.log('📝 No users found - they will be created upon first login');
-    }
 
-    const PORT = process.env.PORT || 8080;
-    app.listen(PORT, () => {
-      console.log(`\n🌐 HR Server running on http://localhost:${PORT}`);
+    const port = PORT || 8080;
+    app.listen(port, () => {
+      console.log(`\n🌐 HR Server running on ${BASE_URL}`);
       console.log('🔗 Connected to MongoDB');
       console.log(`📊 Database: ${mongoose.connection.db.databaseName}`);
-      console.log('\n🎯 Ready for login:');
-      console.log('1. Start frontend: npm run dev (in hr-frontend)');
-      console.log('2. Go to: http://localhost:3000/login');
-      console.log('3. Login with Google - user will be saved to database');
-      console.log('\n⏹️  Press Ctrl+C to stop');
     });
   } catch (error) {
     console.error('❌ Failed to start server:', error);
-    console.error('\n🔧 Troubleshooting:');
-    console.error('- Check internet connection');
-    console.error('- Verify MongoDB credentials');
-    console.error('- Ensure MongoDB is running');
     process.exit(1);
   }
 }
