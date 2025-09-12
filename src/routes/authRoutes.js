@@ -4,18 +4,18 @@ const passport = require('passport');
 const router = express.Router();
 const User = require('../models/User');
 
-// Real login endpoint for your database users
+// Manual login endpoint (for users who exist in database)
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-    console.log('🔐 Login attempt for:', email);
+    console.log('🔐 Manual login attempt for:', email);
     
     // Find user in your database
     const user = await User.findOne({ email: email.toLowerCase() });
     
     if (!user) {
       console.log('❌ User not found:', email);
-      return res.status(401).json({ error: 'Invalid credentials' });
+      return res.status(401).json({ error: 'User not found. Please use Google OAuth to create an account.' });
     }
     
     // For now, we'll accept any password for existing users (you can add bcrypt later)
@@ -42,7 +42,7 @@ router.post('/login', async (req, res) => {
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
     });
     
-    console.log('✅ Login successful for:', user.name);
+    console.log('✅ Manual login successful for:', user.name);
     
     res.json({
       success: true,
@@ -56,7 +56,7 @@ router.post('/login', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('❌ Login error:', error);
+    console.error('❌ Manual login error:', error);
     res.status(500).json({ error: 'Login failed' });
   }
 });
@@ -422,6 +422,8 @@ router.get('/debug-users', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+
 
 // --- Logout route ---
 router.post('/logout', (req, res) => {

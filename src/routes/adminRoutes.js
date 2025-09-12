@@ -933,53 +933,26 @@ router.put('/employees/:id', verifyJWT, isHRorAdmin, updateEmployee);
 router.get('/employees/stats', verifyJWT, isHRorAdmin, getEmployeeStats);
 router.get('/employees/:id/projects', verifyJWT, isHRorAdmin, async (req, res) => {
   try {
-    console.log(`🔍 Admin fetching projects for employee ID: ${req.params.id}`);
-    
     const Project = require('../models/Project');
-    const Milestone = require('../models/Milestone');
-    
     const projects = await Project.find({
-      'teamMembers.employee': req.params.id,
-      status: { $ne: 'archived' } // Don't show archived projects
-    }).populate({
-      path: 'projectManager',
-      select: 'user position',
-      populate: {
-        path: 'user',
-        select: 'name'
-      }
-    });
+      'teamMembers.employee': req.params.id
+    }).populate('projectManager', 'user position');
     
-    console.log(`✅ Found ${projects.length} projects for employee`);
-    
-    // Get milestones for each project
-    const projectsWithDetails = await Promise.all(projects.map(async project => {
+    const projectsWithDetails = projects.map(project => {
       const teamMember = project.teamMembers.find(
         member => member.employee.toString() === req.params.id
       );
       
-      const milestones = await Milestone.find({ 
-        project: project._id,
-        assignedTo: req.params.id 
-      }).sort({ dueDate: 1 });
-      
       return {
         _id: project._id,
         name: project.name,
-        description: project.description,
         status: project.status,
-        priority: project.priority,
-        startDate: project.startDate,
-        endDate: project.endDate,
-        estimatedEndDate: project.estimatedEndDate,
         completionPercentage: project.completionPercentage,
         role: teamMember?.role || 'team-member',
         contributionPercentage: teamMember?.contributionPercentage || 0,
-        hoursWorked: teamMember?.hoursWorked || 0,
-        projectManager: project.projectManager,
-        milestones
+        hoursWorked: teamMember?.hoursWorked || 0
       };
-    }));
+    });
     
     res.json({ projects: projectsWithDetails });
   } catch (error) {
@@ -1098,26 +1071,11 @@ router.post('/employees/:id/performance-review', verifyJWT, isHRorAdmin, async (
 
 // Payroll Management Routes (HR only)
 router.get('/payroll', verifyJWT, isHRorAdmin, getAllPayrolls);
-router.get('/payroll/stats', verifyJWT, isHRorAdmin, getPayrollStats); // Stats route must come before :id route
 router.get('/payroll/:id', verifyJWT, isHRorAdmin, getPayrollById);
 router.post('/payroll', verifyJWT, isHRorAdmin, createPayroll);
 router.put('/payroll/:id', verifyJWT, isHRorAdmin, updatePayroll);
 router.put('/payroll/:id/approve', verifyJWT, isHRorAdmin, approvePayroll);
 router.put('/payroll/:id/mark-paid', verifyJWT, isHRorAdmin, markAsPaid);
-
-// Download payslip for a specific payroll record
-router.get('/payroll/:id/download', verifyJWT, isHRorAdmin, async (req, res) => {
-  try {
-    // Forward to the payslip controller
-    const { generatePayslipPDF } = require('../controllers/payslipController');
-    await generatePayslipPDF(req, res);
-  } catch (error) {
-    console.error('❌ Error in admin payslip download endpoint:', error);
-    res.status(500).json({ 
-      message: 'Failed to download payslip',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
-  }
-});
+router.get('/payroll/stats', verifyJWT, isHRorAdmin, getPayrollStats);
 
 module.exports = router;

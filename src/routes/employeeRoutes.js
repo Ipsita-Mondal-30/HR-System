@@ -423,27 +423,9 @@ router.get('/me/payroll/:id', verifyJWT, async (req, res) => {
   }
 });
 
-// Download payslip for current user's specific payroll record
-router.get('/me/payroll/:id/download', verifyJWT, async (req, res) => {
-  try {
-    // Forward to the payslip controller
-    const { generatePayslipPDF } = require('../controllers/payslipController');
-    await generatePayslipPDF(req, res);
-  } catch (error) {
-    console.error('❌ Error in payslip download endpoint:', error);
-    res.status(500).json({ 
-      message: 'Failed to download payslip',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
-      code: 'PAYSLIP_DOWNLOAD_ERROR'
-    });
-  }
-});
-
 // Get current user's projects
 router.get('/me/projects', verifyJWT, async (req, res) => {
   try {
-    console.log(`🔍 Fetching projects for current user: ${req.user._id}`);
-    
     const employee = await Employee.findOne({ user: req.user._id });
     
     if (!employee) {
@@ -451,54 +433,12 @@ router.get('/me/projects', verifyJWT, async (req, res) => {
     }
 
     const projects = await Project.find({
-      'teamMembers.employee': employee._id,
-      status: { $ne: 'archived' } // Don't show archived projects
+      'teamMembers.employee': employee._id
     })
-      .populate({
-        path: 'projectManager',
-        select: 'user position',
-        populate: {
-          path: 'user',
-          select: 'name'
-        }
-      })
+      .populate('projectManager', 'user position')
       .sort({ startDate: -1 });
 
-    console.log(`✅ Found ${projects.length} projects for employee`);
-    
-    // Get milestones for each project
-    const projectsWithMilestones = await Promise.all(
-      projects.map(async (project) => {
-        const milestones = await Milestone.find({ 
-          project: project._id,
-          assignedTo: employee._id 
-        }).sort({ dueDate: 1 });
-        
-        const teamMember = project.teamMembers.find(
-          member => member.employee.toString() === employee._id.toString()
-        );
-        
-        // Include all necessary project details
-        return {
-          _id: project._id,
-          name: project.name,
-          description: project.description,
-          status: project.status,
-          priority: project.priority,
-          startDate: project.startDate,
-          endDate: project.endDate,
-          estimatedEndDate: project.estimatedEndDate,
-          completionPercentage: project.completionPercentage,
-          role: teamMember?.role || 'team-member',
-          contributionPercentage: teamMember?.contributionPercentage || 0,
-          hoursWorked: teamMember?.hoursWorked || 0,
-          projectManager: project.projectManager,
-          milestones
-        };
-      })
-    );
-
-    res.json({ projects: projectsWithMilestones });
+    res.json({ projects });
   } catch (error) {
     console.error('Error fetching employee projects:', error);
     res.status(500).json({ error: 'Failed to fetch employee projects' });
@@ -557,23 +497,11 @@ router.post('/me/request-feedback', verifyJWT, async (req, res) => {
 // Get employee's projects
 router.get('/:id/projects', verifyJWT, async (req, res) => {
   try {
-    console.log(`🔍 Fetching projects for employee ID: ${req.params.id}`);
-    
     const projects = await Project.find({
-      'teamMembers.employee': req.params.id,
-      status: { $ne: 'archived' } // Don't show archived projects
+      'teamMembers.employee': req.params.id
     })
-      .populate({
-        path: 'projectManager',
-        select: 'user position',
-        populate: {
-          path: 'user',
-          select: 'name'
-        }
-      })
+      .populate('projectManager', 'user position')
       .sort({ startDate: -1 });
-    
-    console.log(`✅ Found ${projects.length} projects for employee`);
     
     // Get milestones for each project
     const projectsWithMilestones = await Promise.all(
@@ -587,21 +515,11 @@ router.get('/:id/projects', verifyJWT, async (req, res) => {
           member => member.employee.toString() === req.params.id
         );
         
-        // Include all necessary project details
         return {
-          _id: project._id,
-          name: project.name,
-          description: project.description,
-          status: project.status,
-          priority: project.priority,
-          startDate: project.startDate,
-          endDate: project.endDate,
-          estimatedEndDate: project.estimatedEndDate,
-          completionPercentage: project.completionPercentage,
+          ...project.toObject(),
           role: teamMember?.role || 'team-member',
           contributionPercentage: teamMember?.contributionPercentage || 0,
           hoursWorked: teamMember?.hoursWorked || 0,
-          projectManager: project.projectManager,
           milestones
         };
       })

@@ -151,17 +151,7 @@ app.get('/api/debug/users', async (req, res) => {
   }
 });
 
-// Seed employees
-app.post('/api/debug/seed-employees', async (req, res) => {
-  try {
-    const { seedEmployeeData } = require('./utils/seedEmployeeData');
-    const result = await seedEmployeeData();
-    res.json({ success: true, message: 'Employee data seeded successfully', data: result });
-  } catch (err) {
-    console.error('Seed employee data error:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
+
 
 // OAuth test endpoint
 app.get('/api/oauth-test', (req, res) => {
