@@ -16,11 +16,15 @@ const {
   MONGODB_URI,
   SESSION_SECRET,
   CORS_ORIGIN,
-  BASE_URL = `http://localhost:${PORT}`,
   FRONTEND_URL,
   GOOGLE_CLIENT_ID,
   GOOGLE_CLIENT_SECRET
 } = process.env;
+
+// Fix BASE_URL for production
+const BASE_URL = process.env.NODE_ENV === 'production' 
+  ? 'https://hr-system-x2uf.onrender.com'
+  : process.env.BASE_URL || `http://localhost:${PORT}`;
 
 // Validate critical envs
 if (!MONGODB_URI) console.warn('⚠️ MONGODB_URI is missing in environment');
