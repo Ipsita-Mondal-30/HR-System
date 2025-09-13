@@ -155,12 +155,15 @@ router.post('/set-role', async (req, res) => {
   }
 
   const { role } = req.body;
-  const validRoles = ['admin', 'hr', 'candidate', 'employee'];
+  const validRoles = ['admin', 'hr', 'candidate', 'employee', null, 'null'];
 
   if (!validRoles.includes(role)) {
     console.log('❌ Invalid role:', role);
     return res.status(400).json({ error: 'Invalid role' });
   }
+
+  // Convert 'null' string to actual null
+  const finalRole = (role === 'null' || role === null) ? null : role;
 
   try {
     // Ensure MongoDB connection
@@ -191,9 +194,9 @@ router.post('/set-role', async (req, res) => {
           _id: userId,
           name: decoded.name,
           email: decoded.email.toLowerCase(),
-          role: role,
+          role: finalRole,
           isActive: true,
-          isVerified: role !== 'hr', // HR needs verification
+          isVerified: finalRole !== 'hr', // HR needs verification
           lastLogin: new Date()
         });
         
@@ -209,9 +212,9 @@ router.post('/set-role', async (req, res) => {
           
           if (user) {
             console.log('✅ Found existing user by email, updating role');
-            user.role = role;
+            user.role = finalRole;
             user.lastLogin = new Date();
-            if (role === 'hr') user.isVerified = false;
+            if (finalRole === 'hr') user.isVerified = false;
             await user.save();
           } else {
             throw createError;
@@ -222,11 +225,11 @@ router.post('/set-role', async (req, res) => {
       }
     } else {
       console.log('👤 User found:', user.name, user.email);
-      console.log('🔄 Updating role from', user.role, 'to', role);
+      console.log('🔄 Updating role from', user.role, 'to', finalRole);
       
-      user.role = role;
+      user.role = finalRole;
       user.lastLogin = new Date();
-      if (role === 'hr') {
+      if (finalRole === 'hr') {
         user.isVerified = false; // HR needs verification
       }
       
@@ -235,7 +238,7 @@ router.post('/set-role', async (req, res) => {
     }
 
     // If user selected 'employee' role, create Employee profile
-    if (role === 'employee') {
+    if (finalRole === 'employee') {
       const Employee = require('../models/Employee');
       const existingEmployee = await Employee.findOne({ user: user._id });
       
