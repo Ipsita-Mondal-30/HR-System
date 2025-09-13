@@ -429,7 +429,43 @@ router.get('/debug-users', async (req, res) => {
   }
 });
 
-
+// --- Temporary test endpoint to remove user role ---
+router.post('/test-remove-role', async (req, res) => {
+  try {
+    const { email } = req.body;
+    
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+    
+    const user = await User.findOne({ email: email.toLowerCase() });
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // Remove the role
+    user.role = null;
+    await user.save();
+    
+    console.log(`✅ Removed role for user: ${email}`);
+    
+    res.json({
+      success: true,
+      message: 'Role removed successfully',
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Error removing role:', error);
+    res.status(500).json({ error: 'Failed to remove role' });
+  }
+});
 
 // --- Logout route ---
 router.post('/logout', (req, res) => {
