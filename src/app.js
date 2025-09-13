@@ -164,15 +164,17 @@ app.get('/api/debug/users', async (req, res) => {
 
 // OAuth test endpoint
 app.get('/api/oauth-test', (req, res) => {
+  const PRODUCTION_URL = 'https://hr-system-x2uf.onrender.com';
   res.json({
-    message: 'OAuth routes are accessible',
+    message: 'OAuth routes are accessible - FIXED VERSION',
     nodeEnv: process.env.NODE_ENV,
     baseUrlFromEnv: process.env.BASE_URL,
     baseUrlResolved: BASE_URL,
+    productionUrl: PRODUCTION_URL,
     googleClientId: GOOGLE_CLIENT_ID ? 'Set' : 'Missing',
     googleClientSecret: GOOGLE_CLIENT_SECRET ? 'Set' : 'Missing',
-    oauthUrl: `${BASE_URL}/api/auth/google`,
-    callbackUrl: `${BASE_URL}/api/auth/google/callback`,
+    oauthUrl: `${PRODUCTION_URL}/api/auth/google`,
+    callbackUrl: `${PRODUCTION_URL}/api/auth/google/callback`,
     timestamp: new Date().toISOString()
   });
 });
