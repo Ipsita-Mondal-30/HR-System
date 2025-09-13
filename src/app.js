@@ -21,10 +21,8 @@ const {
   GOOGLE_CLIENT_SECRET
 } = process.env;
 
-// Fix BASE_URL for production - Force redeploy
-const BASE_URL = process.env.NODE_ENV === 'production' 
-  ? 'https://hr-system-x2uf.onrender.com'
-  : process.env.BASE_URL || `http://localhost:${PORT}`;
+// Fix BASE_URL for production - Hardcode for now
+const BASE_URL = 'https://hr-system-x2uf.onrender.com';
 
 // Validate critical envs
 if (!MONGODB_URI) console.warn('⚠️ MONGODB_URI is missing in environment');
