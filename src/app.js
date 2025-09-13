@@ -180,10 +180,30 @@ app.get('/api/oauth-test', (req, res) => {
     baseUrlFromEnv: process.env.BASE_URL,
     baseUrlResolved: BASE_URL,
     productionUrl: PRODUCTION_URL,
+    frontendUrl: FRONTEND_URL,
+    frontendUrlFromEnv: process.env.FRONTEND_URL,
     googleClientId: GOOGLE_CLIENT_ID ? 'Set' : 'Missing',
     googleClientSecret: GOOGLE_CLIENT_SECRET ? 'Set' : 'Missing',
     oauthUrl: `${PRODUCTION_URL}/api/auth/google`,
     callbackUrl: `${PRODUCTION_URL}/api/auth/google/callback`,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Debug endpoint for frontend URL
+app.get('/api/frontend-debug', (req, res) => {
+  res.json({
+    message: 'Frontend URL Debug',
+    frontendUrl: FRONTEND_URL,
+    frontendUrlFromEnv: process.env.FRONTEND_URL,
+    defaultFrontendUrl: process.env.FRONTEND_URL || "http://localhost:3000",
+    redirectUrls: {
+      roleSelect: `${FRONTEND_URL || "http://localhost:3000"}/role-select`,
+      adminDashboard: `${FRONTEND_URL || "http://localhost:3000"}/admin/dashboard`,
+      hrDashboard: `${FRONTEND_URL || "http://localhost:3000"}/hr/dashboard`,
+      candidateDashboard: `${FRONTEND_URL || "http://localhost:3000"}/candidate/dashboard`,
+      employeeDashboard: `${FRONTEND_URL || "http://localhost:3000"}/employee/dashboard`
+    },
     timestamp: new Date().toISOString()
   });
 });
