@@ -102,7 +102,16 @@ app.use((req, res, next) => {
   next();
 });
 app.get("/", (req, res) => {
-  res.send("Backend is running 🚀");
+  res.send("HR System Backend is running! 🚀 - Updated for OAuth fix");
+});
+
+// Force deployment update
+app.get('/api/deployment-test', (req, res) => {
+  res.json({
+    message: 'Deployment test endpoint',
+    timestamp: new Date().toISOString(),
+    version: 'v2.0-oauth-fix'
+  });
 });
 
 
