@@ -26,6 +26,13 @@ const {
 if (!MONGODB_URI) console.warn('⚠️ MONGODB_URI is missing in environment');
 if (!SESSION_SECRET) console.warn('⚠️ SESSION_SECRET is missing in environment');
 
+// Debug environment variables
+console.log('🔧 Environment Debug:');
+console.log('NODE_ENV:', process.env.NODE_ENV);
+console.log('BASE_URL from env:', process.env.BASE_URL);
+console.log('BASE_URL resolved:', BASE_URL);
+console.log('FRONTEND_URL:', FRONTEND_URL);
+
 const app = express();
 
 // MongoDB preview
