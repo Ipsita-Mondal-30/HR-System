@@ -69,10 +69,12 @@ router.get('/google', passport.authenticate('google', {
 // --- Google OAuth callback ---
 router.get('/google/callback', (req, res, next) => {
   passport.authenticate('google', { session: false }, (err, user, info) => {
-    // Fix for production: hardcode production frontend URL if not set in environment
-    const FRONTEND_URL = process.env.FRONTEND_URL || 
-      (process.env.NODE_ENV === 'production' ? 'https://hr-frontend-54b2.vercel.app' : 'http://localhost:3000');
+    // PRODUCTION FIX: Always use production frontend URL in production
+    const FRONTEND_URL = process.env.NODE_ENV === 'production' 
+      ? 'https://hr-frontend-54b2.vercel.app' 
+      : (process.env.FRONTEND_URL || 'http://localhost:3000');
     
+    console.log('🔗 OAuth callback - NODE_ENV:', process.env.NODE_ENV);
     console.log('🔗 OAuth callback - redirecting to:', FRONTEND_URL);
 
     if (err) {
