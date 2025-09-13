@@ -21,7 +21,7 @@ const {
   GOOGLE_CLIENT_SECRET
 } = process.env;
 
-// Fix BASE_URL for production
+// Fix BASE_URL for production - Force redeploy
 const BASE_URL = process.env.NODE_ENV === 'production' 
   ? 'https://hr-system-x2uf.onrender.com'
   : process.env.BASE_URL || `http://localhost:${PORT}`;
