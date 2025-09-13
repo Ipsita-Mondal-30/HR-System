@@ -168,6 +168,9 @@ app.get('/api/debug/users', async (req, res) => {
 app.get('/api/oauth-test', (req, res) => {
   res.json({
     message: 'OAuth routes are accessible',
+    nodeEnv: process.env.NODE_ENV,
+    baseUrlFromEnv: process.env.BASE_URL,
+    baseUrlResolved: BASE_URL,
     googleClientId: GOOGLE_CLIENT_ID ? 'Set' : 'Missing',
     googleClientSecret: GOOGLE_CLIENT_SECRET ? 'Set' : 'Missing',
     oauthUrl: `${BASE_URL}/api/auth/google`,
