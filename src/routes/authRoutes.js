@@ -470,6 +470,32 @@ router.post('/test-remove-role', async (req, res) => {
   }
 });
 
+// --- Test HR OAuth redirect ---
+router.get('/test-hr-redirect', async (req, res) => {
+  try {
+    const hrUser = await User.findOne({ role: 'hr' });
+    if (!hrUser) {
+      return res.status(404).json({ error: 'No HR user found' });
+    }
+
+    const token = jwt.sign(
+      { _id: hrUser._id, name: hrUser.name, email: hrUser.email, role: hrUser.role },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    const FRONTEND_URL = process.env.NODE_ENV === 'production' 
+      ? 'https://hr-frontend-54b2.vercel.app' 
+      : (process.env.FRONTEND_URL || 'http://localhost:3000');
+
+    console.log('🧪 Test HR redirect - redirecting to:', `${FRONTEND_URL}/hr/dashboard?token=${token}`);
+    return res.redirect(`${FRONTEND_URL}/hr/dashboard?token=${token}`);
+  } catch (error) {
+    console.error('❌ Test HR redirect error:', error);
+    res.status(500).json({ error: 'Test redirect failed' });
+  }
+});
+
 // --- Logout route ---
 router.post('/logout', (req, res) => {
   res.clearCookie('auth_token');
