@@ -488,11 +488,38 @@ router.get('/test-hr-redirect', async (req, res) => {
       ? 'https://hr-frontend-54b2.vercel.app' 
       : (process.env.FRONTEND_URL || 'http://localhost:3000');
 
+    console.log('🧪 Test HR redirect - User data:', { name: hrUser.name, email: hrUser.email, role: hrUser.role });
+    console.log('🧪 Test HR redirect - Token generated:', token.substring(0, 20) + '...');
     console.log('🧪 Test HR redirect - redirecting to:', `${FRONTEND_URL}/hr/dashboard?token=${token}`);
     return res.redirect(`${FRONTEND_URL}/hr/dashboard?token=${token}`);
   } catch (error) {
     console.error('❌ Test HR redirect error:', error);
     res.status(500).json({ error: 'Test redirect failed' });
+  }
+});
+
+// --- Get token for HR user (for testing) ---
+router.get('/get-hr-token', async (req, res) => {
+  try {
+    const hrUser = await User.findOne({ role: 'hr' });
+    if (!hrUser) {
+      return res.status(404).json({ error: 'No HR user found' });
+    }
+
+    const token = jwt.sign(
+      { _id: hrUser._id, name: hrUser.name, email: hrUser.email, role: hrUser.role },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    res.json({ 
+      user: { name: hrUser.name, email: hrUser.email, role: hrUser.role },
+      token: token,
+      testUrl: `https://hr-frontend-54b2.vercel.app/hr/dashboard?token=${token}`
+    });
+  } catch (error) {
+    console.error('❌ Get HR token error:', error);
+    res.status(500).json({ error: 'Failed to get HR token' });
   }
 });
 
