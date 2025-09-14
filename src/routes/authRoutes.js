@@ -28,7 +28,8 @@ router.post('/login', async (req, res) => {
         _id: user._id, 
         email: user.email, 
         role: user.role,
-        name: user.name
+        name: user.name,
+        isVerified: user.isVerified
       },
       process.env.JWT_SECRET || 'fallback-secret',
       { expiresIn: '7d' }
@@ -89,7 +90,7 @@ router.get('/google/callback', (req, res, next) => {
 
     try {
       const token = jwt.sign(
-        { _id: user._id, name: user.name, email: user.email, role: user.role },
+        { _id: user._id, name: user.name, email: user.email, role: user.role, isVerified: user.isVerified },
         process.env.JWT_SECRET,
         { expiresIn: '7d' }
       );
@@ -263,6 +264,7 @@ router.post('/set-role', async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
+        isVerified: user.isVerified
       },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
@@ -479,7 +481,7 @@ router.get('/test-hr-redirect', async (req, res) => {
     }
 
     const token = jwt.sign(
-      { _id: hrUser._id, name: hrUser.name, email: hrUser.email, role: hrUser.role },
+      { _id: hrUser._id, name: hrUser.name, email: hrUser.email, role: hrUser.role, isVerified: hrUser.isVerified },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -507,7 +509,7 @@ router.get('/get-hr-token', async (req, res) => {
     }
 
     const token = jwt.sign(
-      { _id: hrUser._id, name: hrUser.name, email: hrUser.email, role: hrUser.role },
+      { _id: hrUser._id, name: hrUser.name, email: hrUser.email, role: hrUser.role, isVerified: hrUser.isVerified },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -520,6 +522,45 @@ router.get('/get-hr-token', async (req, res) => {
   } catch (error) {
     console.error('❌ Get HR token error:', error);
     res.status(500).json({ error: 'Failed to get HR token' });
+  }
+});
+
+// --- Fix HR verification status ---
+router.post('/fix-hr-verification', async (req, res) => {
+  try {
+    console.log('🔧 Fixing HR user verification status...');
+    
+    // Find HR user
+    const hrUser = await User.findOne({ email: 'ipsitaamondal@gmail.com' });
+    if (!hrUser) {
+      return res.status(404).json({ error: 'HR user not found' });
+    }
+
+    console.log('👤 Found HR user:', {
+      email: hrUser.email,
+      role: hrUser.role,
+      isVerified: hrUser.isVerified
+    });
+
+    // Update verification status
+    hrUser.isVerified = true;
+    await hrUser.save();
+
+    console.log('✅ HR user verification updated successfully');
+    
+    res.json({
+      success: true,
+      message: 'HR user verification updated successfully',
+      user: {
+        email: hrUser.email,
+        role: hrUser.role,
+        isVerified: hrUser.isVerified
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error fixing HR verification:', error);
+    res.status(500).json({ error: 'Failed to fix HR verification' });
   }
 });
 
