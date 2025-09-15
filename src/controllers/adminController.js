@@ -170,7 +170,7 @@ const getCandidates = async (req, res) => {
       candidates.map(async (candidate) => {
         const [applications, savedJobs] = await Promise.all([
           Application.find({ candidate: candidate._id })
-            .populate('job', 'title company')
+            .populate('job', 'title companyName')
             .select('status createdAt hrNotes'),
           // For now, we'll simulate saved jobs since we don't have a SavedJob model
           Promise.resolve([])
@@ -191,7 +191,7 @@ const getCandidates = async (req, res) => {
           applications: applications.map(app => ({
             _id: app._id,
             jobTitle: app.job?.title || 'Unknown Job',
-            companyName: app.job?.company || 'Unknown Company',
+            companyName: app.job?.companyName || 'Unknown Company',
             status: app.status,
             appliedAt: app.createdAt,
             hrNotes: app.hrNotes

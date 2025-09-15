@@ -198,12 +198,22 @@ exports.getApplications = async (req, res) => {
       filter.job = req.query.job;
     }
 
+    // Handle status filtering - support both single and multiple statuses
+    if (req.query.status) {
+      const statusValues = req.query.status.split(',').map(s => s.trim());
+      if (statusValues.length === 1) {
+        filter.status = statusValues[0];
+      } else {
+        filter.status = { $in: statusValues };
+      }
+    }
+
     const applications = await Application.find(filter)
     .populate('job', 'title companyName department')
     .populate('candidate', 'name email skills experience')
-    .sort({ matchScore: -1, createdAt: -1 }); // NEW: sort by score first
-  
+    .sort({ matchScore: -1, createdAt: -1 });
 
+    console.log(`📊 Fetched ${applications.length} applications with filter:`, filter);
     res.status(200).json(applications);
   } catch (err) {
     console.error('Error fetching applications:', err);
