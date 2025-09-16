@@ -152,6 +152,7 @@ app.use('/api/okrs', require('./routes/okrRoutes'));
 app.use('/api/achievements', require('./routes/achievementRoutes'));
 app.use('/api/admin/achievements', require('./routes/achievementRoutes'));
 app.use('/api/fix', require('./routes/fixRoutes'));
+app.use('/api/debug', require('./routes/debugRoutes'));
 
 // Debug users endpoint
 app.get('/api/debug/users', async (req, res) => {

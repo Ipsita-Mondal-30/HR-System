@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 const User = require('./src/models/User');
 
 // MongoDB connection string
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://ipsita30:XMw7VFSSxLZUOJkH@cluster0.yqhqb.mongodb.net/hrsystem';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/hrsystem';
 
 async function fixHRVerification() {
   try {
