@@ -526,10 +526,18 @@ router.get('/analytics', verifyJWT, isHRorAdmin, async (req, res) => {
             // Top companies
             Job.aggregate([
                 {
+                    $lookup: {
+                        from: 'applications',
+                        localField: '_id',
+                        foreignField: 'job',
+                        as: 'jobApplications'
+                    }
+                },
+                {
                     $group: {
                         _id: '$companyName',
                         jobsPosted: { $sum: 1 },
-                        applications: { $sum: 0 } // We'll calculate this separately
+                        applications: { $sum: { $size: '$jobApplications' } }
                     }
                 },
                 { $sort: { jobsPosted: -1 } },
@@ -584,26 +592,17 @@ router.get('/analytics', verifyJWT, isHRorAdmin, async (req, res) => {
 // Recent activity
 router.get('/recent-activity', verifyJWT, isHRorAdmin, async (req, res) => {
     try {
-        // Mock recent activity data
-        const recentActivity = [
-            {
-                type: 'user_registered',
-                message: 'New candidate registered',
-                timestamp: new Date(Date.now() - 1000 * 60 * 30).toISOString() // 30 minutes ago
-            },
-            {
-                type: 'job_posted',
-                message: 'New job posted: Software Engineer',
-                timestamp: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString() // 2 hours ago
-            },
-            {
-                type: 'application_submitted',
-                message: 'New application received',
-                timestamp: new Date(Date.now() - 1000 * 60 * 60 * 4).toISOString() // 4 hours ago
-            }
-        ];
+        const recentUsers = await User.find().sort({ createdAt: -1 }).limit(5);
+        const recentJobs = await Job.find().sort({ createdAt: -1 }).limit(5);
+        const recentApplications = await Application.find().sort({ createdAt: -1 }).limit(5);
 
-        res.json(recentActivity);
+        const activity = [
+            ...recentUsers.map(u => ({ type: 'user_registered', message: `New ${u.role} registered: ${u.name}`, timestamp: u.createdAt })),
+            ...recentJobs.map(j => ({ type: 'job_posted', message: `New job posted: ${j.title}`, timestamp: j.createdAt })),
+            ...recentApplications.map(a => ({ type: 'application_submitted', message: 'New application received', timestamp: a.createdAt }))
+        ].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 10);
+
+        res.json(activity);
     } catch (err) {
         console.error('Error fetching recent activity:', err);
         res.status(500).json({ error: 'Failed to fetch recent activity' });

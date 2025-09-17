@@ -111,8 +111,8 @@ const getHRDashboardData = async (req, res) => {
   try {
     const [totalJobs, openJobs, closedJobs] = await Promise.all([
       Job.countDocuments(),
-      Job.countDocuments({ status: 'open' }),
-      Job.countDocuments({ status: 'closed' }),
+      Job.countDocuments({ status: { $in: ['active', 'open'] }, isApproved: true }),
+      Job.countDocuments({ status: { $in: ['inactive', 'closed'] } }),
     ]);
 
     const totalApplications = await Application.countDocuments();
@@ -170,7 +170,7 @@ const getCandidates = async (req, res) => {
       candidates.map(async (candidate) => {
         const [applications, savedJobs] = await Promise.all([
           Application.find({ candidate: candidate._id })
-            .populate('job', 'title companyName')
+            .populate('job', 'title company')
             .select('status createdAt hrNotes'),
           // For now, we'll simulate saved jobs since we don't have a SavedJob model
           Promise.resolve([])
@@ -191,7 +191,7 @@ const getCandidates = async (req, res) => {
           applications: applications.map(app => ({
             _id: app._id,
             jobTitle: app.job?.title || 'Unknown Job',
-            companyName: app.job?.companyName || 'Unknown Company',
+            companyName: app.job?.company || 'Unknown Company',
             status: app.status,
             appliedAt: app.createdAt,
             hrNotes: app.hrNotes

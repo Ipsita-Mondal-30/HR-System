@@ -188,33 +188,9 @@ const getEmployeeStats = async (req, res) => {
   }
 };
 
-// Get current employee profile
-const getCurrentEmployee = async (req, res) => {
-  try {
-    console.log('🔍 Fetching current employee profile for user:', req.user.id);
-    
-    const employee = await Employee.findOne({ user: req.user.id })
-      .populate('user', 'name email phone')
-      .populate('department', 'name')
-      .populate('manager', 'user position');
-
-    if (!employee) {
-      console.log('❌ Employee not found for user:', req.user.id);
-      return res.status(404).json({ error: 'Employee profile not found' });
-    }
-
-    console.log('✅ Employee profile found:', employee.user.name);
-    res.json(employee);
-  } catch (error) {
-    console.error('❌ Error fetching current employee:', error);
-    res.status(500).json({ error: 'Failed to fetch employee profile' });
-  }
-};
-
 module.exports = {
   getAllEmployees,
   createEmployee,
   updateEmployee,
-  getEmployeeStats,
-  getCurrentEmployee
+  getEmployeeStats
 };

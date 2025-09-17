@@ -28,8 +28,7 @@ router.post('/login', async (req, res) => {
         _id: user._id, 
         email: user.email, 
         role: user.role,
-        name: user.name,
-        isVerified: user.isVerified
+        name: user.name
       },
       process.env.JWT_SECRET || 'fallback-secret',
       { expiresIn: '7d' }
@@ -70,13 +69,7 @@ router.get('/google', passport.authenticate('google', {
 // --- Google OAuth callback ---
 router.get('/google/callback', (req, res, next) => {
   passport.authenticate('google', { session: false }, (err, user, info) => {
-    // PRODUCTION FIX: Always use production frontend URL in production
-    const FRONTEND_URL = process.env.NODE_ENV === 'production' 
-      ? 'https://hr-frontend-54b2.vercel.app' 
-      : (process.env.FRONTEND_URL || 'http://localhost:3000');
-    
-    console.log('🔗 OAuth callback - NODE_ENV:', process.env.NODE_ENV);
-    console.log('🔗 OAuth callback - redirecting to:', FRONTEND_URL);
+    const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
 
     if (err) {
       console.error('❌ OAuth authentication error:', err);
@@ -90,7 +83,7 @@ router.get('/google/callback', (req, res, next) => {
 
     try {
       const token = jwt.sign(
-        { _id: user._id, name: user.name, email: user.email, role: user.role, isVerified: user.isVerified },
+        { _id: user._id, name: user.name, email: user.email, role: user.role },
         process.env.JWT_SECRET,
         { expiresIn: '7d' }
       );
@@ -156,15 +149,12 @@ router.post('/set-role', async (req, res) => {
   }
 
   const { role } = req.body;
-  const validRoles = ['admin', 'hr', 'candidate', 'employee', null, 'null'];
+  const validRoles = ['admin', 'hr', 'candidate', 'employee'];
 
   if (!validRoles.includes(role)) {
     console.log('❌ Invalid role:', role);
     return res.status(400).json({ error: 'Invalid role' });
   }
-
-  // Convert 'null' string to actual null
-  const finalRole = (role === 'null' || role === null) ? null : role;
 
   try {
     // Ensure MongoDB connection
@@ -195,9 +185,9 @@ router.post('/set-role', async (req, res) => {
           _id: userId,
           name: decoded.name,
           email: decoded.email.toLowerCase(),
-          role: finalRole,
+          role: role,
           isActive: true,
-          isVerified: finalRole !== 'hr', // HR needs verification
+          isVerified: role !== 'hr', // HR needs verification
           lastLogin: new Date()
         });
         
@@ -213,9 +203,9 @@ router.post('/set-role', async (req, res) => {
           
           if (user) {
             console.log('✅ Found existing user by email, updating role');
-            user.role = finalRole;
+            user.role = role;
             user.lastLogin = new Date();
-            if (finalRole === 'hr') user.isVerified = false;
+            if (role === 'hr') user.isVerified = false;
             await user.save();
           } else {
             throw createError;
@@ -226,11 +216,11 @@ router.post('/set-role', async (req, res) => {
       }
     } else {
       console.log('👤 User found:', user.name, user.email);
-      console.log('🔄 Updating role from', user.role, 'to', finalRole);
+      console.log('🔄 Updating role from', user.role, 'to', role);
       
-      user.role = finalRole;
+      user.role = role;
       user.lastLogin = new Date();
-      if (finalRole === 'hr') {
+      if (role === 'hr') {
         user.isVerified = false; // HR needs verification
       }
       
@@ -239,7 +229,7 @@ router.post('/set-role', async (req, res) => {
     }
 
     // If user selected 'employee' role, create Employee profile
-    if (finalRole === 'employee') {
+    if (role === 'employee') {
       const Employee = require('../models/Employee');
       const existingEmployee = await Employee.findOne({ user: user._id });
       
@@ -264,7 +254,6 @@ router.post('/set-role', async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
-        isVerified: user.isVerified
       },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
@@ -434,135 +423,7 @@ router.get('/debug-users', async (req, res) => {
   }
 });
 
-// --- Temporary test endpoint to remove user role ---
-router.post('/test-remove-role', async (req, res) => {
-  try {
-    const { email } = req.body;
-    
-    if (!email) {
-      return res.status(400).json({ error: 'Email is required' });
-    }
-    
-    const user = await User.findOne({ email: email.toLowerCase() });
-    
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-    
-    // Remove the role
-    user.role = null;
-    await user.save();
-    
-    console.log(`✅ Removed role for user: ${email}`);
-    
-    res.json({
-      success: true,
-      message: 'Role removed successfully',
-      user: {
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role
-      }
-    });
-    
-  } catch (error) {
-    console.error('❌ Error removing role:', error);
-    res.status(500).json({ error: 'Failed to remove role' });
-  }
-});
 
-// --- Test HR OAuth redirect ---
-router.get('/test-hr-redirect', async (req, res) => {
-  try {
-    const hrUser = await User.findOne({ role: 'hr' });
-    if (!hrUser) {
-      return res.status(404).json({ error: 'No HR user found' });
-    }
-
-    const token = jwt.sign(
-      { _id: hrUser._id, name: hrUser.name, email: hrUser.email, role: hrUser.role, isVerified: hrUser.isVerified },
-      process.env.JWT_SECRET,
-      { expiresIn: '7d' }
-    );
-
-    const FRONTEND_URL = process.env.NODE_ENV === 'production' 
-      ? 'https://hr-frontend-54b2.vercel.app' 
-      : (process.env.FRONTEND_URL || 'http://localhost:3000');
-
-    console.log('🧪 Test HR redirect - User data:', { name: hrUser.name, email: hrUser.email, role: hrUser.role });
-    console.log('🧪 Test HR redirect - Token generated:', token.substring(0, 20) + '...');
-    console.log('🧪 Test HR redirect - redirecting to:', `${FRONTEND_URL}/hr/dashboard?token=${token}`);
-    return res.redirect(`${FRONTEND_URL}/hr/dashboard?token=${token}`);
-  } catch (error) {
-    console.error('❌ Test HR redirect error:', error);
-    res.status(500).json({ error: 'Test redirect failed' });
-  }
-});
-
-// --- Get token for HR user (for testing) ---
-router.get('/get-hr-token', async (req, res) => {
-  try {
-    const hrUser = await User.findOne({ role: 'hr' });
-    if (!hrUser) {
-      return res.status(404).json({ error: 'No HR user found' });
-    }
-
-    const token = jwt.sign(
-      { _id: hrUser._id, name: hrUser.name, email: hrUser.email, role: hrUser.role, isVerified: hrUser.isVerified },
-      process.env.JWT_SECRET,
-      { expiresIn: '7d' }
-    );
-
-    res.json({ 
-      user: { name: hrUser.name, email: hrUser.email, role: hrUser.role },
-      token: token,
-      testUrl: `https://hr-frontend-54b2.vercel.app/hr/dashboard?token=${token}`
-    });
-  } catch (error) {
-    console.error('❌ Get HR token error:', error);
-    res.status(500).json({ error: 'Failed to get HR token' });
-  }
-});
-
-// --- Fix HR verification status ---
-router.post('/fix-hr-verification', async (req, res) => {
-  try {
-    console.log('🔧 Fixing HR user verification status...');
-    
-    // Find HR user
-    const hrUser = await User.findOne({ email: 'ipsitaamondal@gmail.com' });
-    if (!hrUser) {
-      return res.status(404).json({ error: 'HR user not found' });
-    }
-
-    console.log('👤 Found HR user:', {
-      email: hrUser.email,
-      role: hrUser.role,
-      isVerified: hrUser.isVerified
-    });
-
-    // Update verification status
-    hrUser.isVerified = true;
-    await hrUser.save();
-
-    console.log('✅ HR user verification updated successfully');
-    
-    res.json({
-      success: true,
-      message: 'HR user verification updated successfully',
-      user: {
-        email: hrUser.email,
-        role: hrUser.role,
-        isVerified: hrUser.isVerified
-      }
-    });
-
-  } catch (error) {
-    console.error('❌ Error fixing HR verification:', error);
-    res.status(500).json({ error: 'Failed to fix HR verification' });
-  }
-});
 
 // --- Logout route ---
 router.post('/logout', (req, res) => {
