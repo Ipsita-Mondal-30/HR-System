@@ -9,7 +9,72 @@ const OKR = require('../models/OKR');
 const User = require('../models/User');
 const { CohereClient } = require('cohere-ai');
 
-// Get current employee profile
+// Get current user's employee profile (alias for /me)
+router.get('/profile', verifyJWT, async (req, res) => {
+  try {
+    console.log('🔍 Fetching employee profile for user:', req.user.id);
+    
+    const employee = await Employee.findOne({ user: req.user.id })
+      .populate('user', 'name email phone')
+      .populate('department', 'name')
+      .populate('manager', 'user position');
+
+    if (!employee) {
+      console.log('❌ Employee not found for user:', req.user.id);
+      return res.status(404).json({ error: 'Employee profile not found' });
+    }
+
+    console.log('✅ Employee profile found:', employee.user.name);
+    res.json(employee);
+  } catch (error) {
+    console.error('❌ Error fetching employee profile:', error);
+    res.status(500).json({ error: 'Failed to fetch employee profile' });
+  }
+});
+
+// Get dashboard stats for current employee
+router.get('/dashboard/stats', verifyJWT, async (req, res) => {
+  try {
+    console.log('📊 Fetching dashboard stats for user:', req.user.id);
+    
+    const employee = await Employee.findOne({ user: req.user.id });
+    if (!employee) {
+      return res.status(404).json({ error: 'Employee profile not found' });
+    }
+
+    // Get project stats
+    const totalProjects = await Project.countDocuments({
+      'teamMembers.employee': employee._id
+    });
+    
+    const activeProjects = await Project.countDocuments({
+      'teamMembers.employee': employee._id,
+      status: 'active'
+    });
+
+    // Get feedback count
+    const feedbackCount = await Feedback.countDocuments({
+      employee: employee._id
+    });
+
+    const stats = {
+      totalProjects,
+      activeProjects,
+      completedTasks: 0, // Placeholder - implement task tracking if needed
+      upcomingDeadlines: 0, // Placeholder - implement deadline tracking if needed
+      performanceScore: employee.performanceScore || 0,
+      achievements: feedbackCount // Using feedback count as achievements for now
+    };
+
+    console.log('✅ Dashboard stats:', stats);
+    res.json(stats);
+  } catch (error) {
+    console.error('❌ Error fetching dashboard stats:', error);
+    res.status(500).json({ error: 'Failed to fetch dashboard stats' });
+  }
+});
+
+// Get current user's employee profile
 router.get('/me', verifyJWT, async (req, res) => {
   try {
     console.log('🔍 Fetching current employee profile for user:', req.user.id);
@@ -240,23 +305,7 @@ function getFallbackInsights(employee) {
 }
 
 // Get current user's employee profile
-router.get('/me', verifyJWT, async (req, res) => {
-  try {
-    const employee = await Employee.findOne({ user: req.user._id })
-      .populate('user', 'name email')
-      .populate('department', 'name')
-      .populate('manager', 'user position');
-    
-    if (!employee) {
-      return res.status(404).json({ error: 'Employee profile not found' });
-    }
-    
-    res.json(employee);
-  } catch (error) {
-    console.error('Error fetching employee profile:', error);
-    res.status(500).json({ error: 'Failed to fetch employee profile' });
-  }
-});
+// Duplicate route removed - using the first /me route instead
 
 // Get current user's payroll records
 router.get('/me/payroll', verifyJWT, async (req, res) => {
@@ -848,6 +897,7 @@ router.post('/:id/ai-insights', verifyJWT, async (req, res) => {
 // Get top performers
 router.get('/top-performers', verifyJWT, async (req, res) => {
   try {
+    console.log('🏆 Fetching top performers...');
     const { period = 'quarter', limit = 5, department } = req.query;
     
     let dateFilter = new Date();
@@ -859,8 +909,12 @@ router.get('/top-performers', verifyJWT, async (req, res) => {
       dateFilter.setFullYear(dateFilter.getFullYear() - 1);
     }
     
+    console.log('📅 Date filter:', dateFilter);
+    
     const query = { status: 'active' };
     if (department) query.department = department;
+    
+    console.log('🔍 Query:', query);
     
     const topPerformers = await Employee.find(query)
       .populate('user', 'name email')
@@ -868,43 +922,62 @@ router.get('/top-performers', verifyJWT, async (req, res) => {
       .sort({ performanceScore: -1 })
       .limit(parseInt(limit));
     
+    console.log(`👥 Found ${topPerformers.length} employees`);
+    
     // Get additional metrics for each performer
     const performersWithMetrics = await Promise.all(
       topPerformers.map(async (employee) => {
-        const projects = await Project.find({
-          'teamMembers.employee': employee._id,
-          updatedAt: { $gte: dateFilter }
-        });
-        
-        const feedback = await Feedback.find({
-          employee: employee._id,
-          createdAt: { $gte: dateFilter },
-          status: { $in: ['submitted', 'reviewed'] }
-        });
-        
-        const avgRating = feedback.length > 0 
-          ? feedback.reduce((sum, f) => sum + (f.overallRating || 0), 0) / feedback.length
-          : 0;
-        
-        return {
-          employee,
-          metrics: {
-            projectsInvolved: projects.length,
-            averageRating: avgRating,
-            feedbackCount: feedback.length,
-            performanceScore: employee.performanceScore
-          }
-        };
+        try {
+          console.log(`📊 Processing metrics for employee: ${employee.user?.name || 'Unknown'}`);
+          
+          const projects = await Project.find({
+            'teamMembers.employee': employee._id,
+            updatedAt: { $gte: dateFilter }
+          });
+          
+          const feedback = await Feedback.find({
+            employee: employee._id,
+            createdAt: { $gte: dateFilter },
+            status: { $in: ['submitted', 'reviewed'] }
+          });
+          
+          const avgRating = feedback.length > 0 
+            ? feedback.reduce((sum, f) => sum + (f.overallRating || 0), 0) / feedback.length
+            : 0;
+          
+          return {
+            employee,
+            metrics: {
+              projectsInvolved: projects.length,
+              averageRating: avgRating,
+              feedbackCount: feedback.length,
+              performanceScore: employee.performanceScore
+            }
+          };
+        } catch (metricError) {
+          console.error(`❌ Error processing metrics for employee ${employee._id}:`, metricError);
+          return {
+            employee,
+            metrics: {
+              projectsInvolved: 0,
+              averageRating: 0,
+              feedbackCount: 0,
+              performanceScore: employee.performanceScore || 0
+            }
+          };
+        }
       })
     );
+    
+    console.log('✅ Top performers processed successfully');
     
     res.json({
       period,
       topPerformers: performersWithMetrics
     });
   } catch (error) {
-    console.error('Error fetching top performers:', error);
-    res.status(500).json({ error: 'Failed to fetch top performers' });
+    console.error('❌ Error fetching top performers:', error);
+    res.status(500).json({ error: 'Failed to fetch top performers', details: error.message });
   }
 });
 
