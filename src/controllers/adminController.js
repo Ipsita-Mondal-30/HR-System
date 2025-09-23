@@ -109,11 +109,15 @@ const getAdminStats = async (req, res) => {
 
 const getHRDashboardData = async (req, res) => {
   try {
+    console.log('🔍 Fetching HR dashboard data...');
+    
     const [totalJobs, openJobs, closedJobs] = await Promise.all([
       Job.countDocuments(),
-      Job.countDocuments({ status: { $in: ['active', 'open'] }, isApproved: true }),
-      Job.countDocuments({ status: { $in: ['inactive', 'closed'] } }),
+      Job.countDocuments({ status: 'active', isApproved: true }),
+      Job.countDocuments({ status: { $in: ['inactive', 'closed', 'rejected'] } }),
     ]);
+    
+    console.log('📊 Job counts:', { totalJobs, openJobs, closedJobs });
 
     const totalApplications = await Application.countDocuments();
 
