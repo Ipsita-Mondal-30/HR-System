@@ -3,8 +3,8 @@ const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const User = require('../models/User');
 const mongoose = require('mongoose');
 
-// ✅ Hardcode production BASE_URL
-const BASE_URL = "https://hr-system-x2uf.onrender.com";
+// Use BASE_URL from environment or default based on NODE_ENV
+const BASE_URL = process.env.BASE_URL || (process.env.NODE_ENV === 'production' ? 'https://hr-system-x2uf.onrender.com' : 'http://localhost:8080');
 
 passport.use(new GoogleStrategy({
   clientID: process.env.GOOGLE_CLIENT_ID,

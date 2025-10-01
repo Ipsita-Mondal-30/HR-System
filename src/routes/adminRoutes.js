@@ -853,6 +853,58 @@ router.get('/interviews', verifyJWT, isHRorAdmin, async (req, res) => {
 
 // Employee Management Routes
 router.get('/employees', verifyJWT, isHRorAdmin, getAllEmployees);
+
+// Get top performing employees (must be before /:id route)
+router.get('/employees/top-performers', verifyJWT, isHRorAdmin, async (req, res) => {
+  try {
+    const { limit = 5 } = req.query;
+    const Employee = require('../models/Employee');
+    const Project = require('../models/Project');
+    const Feedback = require('../models/Feedback');
+    
+    // Get employees with performance scores
+    const employees = await Employee.find({ status: 'active' })
+      .populate('user', 'name email')
+      .populate('department', 'name')
+      .sort({ performanceScore: -1 })
+      .limit(parseInt(limit));
+    
+    // Calculate additional metrics for each employee
+    const topPerformers = await Promise.all(
+      employees.map(async (employee) => {
+        const [projectsCount, feedbackData] = await Promise.all([
+          Project.countDocuments({ 'teamMembers.employee': employee._id }),
+          Feedback.find({ employee: employee._id })
+        ]);
+        
+        const averageRating = feedbackData.length > 0 
+          ? feedbackData.reduce((sum, f) => sum + (f.overallRating || 0), 0) / feedbackData.length 
+          : 0;
+        
+        return {
+          employee: {
+            _id: employee._id,
+            user: { name: employee.user.name },
+            position: employee.position,
+            performanceScore: employee.performanceScore || 0
+          },
+          metrics: {
+            projectsInvolved: projectsCount,
+            averageRating: Math.round(averageRating * 10) / 10,
+            feedbackCount: feedbackData.length
+          }
+        };
+      })
+    );
+    
+    console.log(`📊 Found ${topPerformers.length} top performers`);
+    res.json(topPerformers);
+  } catch (error) {
+    console.error('Error fetching top performers:', error);
+    res.status(500).json({ error: 'Failed to fetch top performers' });
+  }
+});
+
 router.get('/employees/:id', verifyJWT, isHRorAdmin, async (req, res) => {
   try {
     const Employee = require('../models/Employee');
