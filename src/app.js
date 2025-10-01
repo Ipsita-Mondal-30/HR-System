@@ -9,7 +9,12 @@ const expressSession = require('express-session');
 const cookieParser = require('cookie-parser');
 
 // Load environment variables early
-dotenv.config();
+// Load .env.local first for local development, then fallback to .env
+if (require('fs').existsSync('.env.local')) {
+  dotenv.config({ path: '.env.local' });
+} else {
+  dotenv.config();
+}
 
 const {
   PORT = 8080,
@@ -146,6 +151,7 @@ app.use('/api/users', require('./routes/userRoutes'));
 app.use('/api/candidate', require('./routes/candidateRoutes'));
 app.use('/api/hr', require('./routes/hrRoutes'));
 app.use('/api/employees', require('./routes/employeeRoutes'));
+app.use('/api/employee', require('./routes/employeeRoutes')); // Add singular route for frontend compatibility
 app.use('/api/projects', require('./routes/projectRoutes'));
 app.use('/api/feedback', require('./routes/feedbackRoutes'));
 app.use('/api/okrs', require('./routes/okrRoutes'));

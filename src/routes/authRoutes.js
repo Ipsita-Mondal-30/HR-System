@@ -38,7 +38,7 @@ router.post('/login', async (req, res) => {
     res.cookie('auth_token', token, {
       httpOnly: false, // Allow client-side access
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
     });
     
@@ -92,7 +92,7 @@ router.get('/google/callback', (req, res, next) => {
       res.cookie('auth_token', token, {
         httpOnly: false,
         secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
         maxAge: 7 * 24 * 60 * 60 * 1000
       });
 
@@ -263,7 +263,7 @@ router.post('/set-role', async (req, res) => {
     res.cookie('auth_token', newToken, {
       httpOnly: false,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
     });
 
