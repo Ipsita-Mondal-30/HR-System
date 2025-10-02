@@ -151,7 +151,6 @@ app.use('/api/users', require('./routes/userRoutes'));
 app.use('/api/candidate', require('./routes/candidateRoutes'));
 app.use('/api/hr', require('./routes/hrRoutes'));
 app.use('/api/employees', require('./routes/employeeRoutes'));
-app.use('/api/employee', require('./routes/employeeRoutes')); // Add singular route for frontend compatibility
 app.use('/api/projects', require('./routes/projectRoutes'));
 app.use('/api/feedback', require('./routes/feedbackRoutes'));
 app.use('/api/okrs', require('./routes/okrRoutes'));
