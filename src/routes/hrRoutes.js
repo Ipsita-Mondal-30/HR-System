@@ -4,6 +4,7 @@ const { verifyJWT, isHRorAdmin } = require('../middleware/auth');
 const { sendEmail } = require('../utils/email');
 const Application = require('../models/Application');
 const User = require('../models/User');
+const Job = require('../models/Job');
 const {
   getAllPayrolls,
   getPayrollById,
@@ -20,12 +21,79 @@ const {
   getEmployeeStats
 } = require('../controllers/employeeController');
 
+// HR Debug endpoint
+router.get('/debug', verifyJWT, isHRorAdmin, async (req, res) => {
+  try {
+    res.json({
+      message: 'HR routes are working',
+      user: req.user,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// HR Dashboard endpoint
+router.get('/dashboard', verifyJWT, isHRorAdmin, async (req, res) => {
+  try {
+    console.log('📊 Fetching HR dashboard data...');
+
+    const [
+      totalJobs,
+      openJobs,
+      closedJobs,
+      totalApplications,
+      recentApplications
+    ] = await Promise.all([
+      Job.countDocuments(),
+      Job.countDocuments({ status: 'open' }),
+      Job.countDocuments({ status: 'closed' }),
+      Application.countDocuments(),
+      Application.find()
+        .populate('job', 'title')
+        .populate('candidate', 'name email')
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .lean()
+    ]);
+
+    // Calculate average match score (mock for now)
+    const avgMatchScore = totalApplications > 0 ? 75 : 0;
+
+    const dashboardData = {
+      totalJobs,
+      openJobs,
+      closedJobs,
+      totalApplications,
+      avgMatchScore,
+      recentApplications: recentApplications.map(app => ({
+        _id: app._id,
+        name: app.candidate?.name || 'Unknown',
+        email: app.candidate?.email || 'Unknown',
+        job: { title: app.job?.title || 'Unknown Job' },
+        matchScore: Math.floor(Math.random() * 40) + 60 // Mock score 60-100
+      }))
+    };
+
+    console.log('✅ HR dashboard data prepared:', dashboardData);
+    res.json(dashboardData);
+
+  } catch (error) {
+    console.error('❌ Error fetching HR dashboard data:', error);
+    res.status(500).json({
+      error: 'Failed to fetch dashboard data',
+      details: error.message
+    });
+  }
+});
+
 // Send message to candidate
 router.post('/send-message', verifyJWT, isHRorAdmin, async (req, res) => {
   try {
     const { applicationId, subject, message, recipientEmail } = req.body;
     const hrUser = await User.findById(req.user._id);
-    
+
     if (!subject || !message || !recipientEmail) {
       return res.status(400).json({ error: 'Subject, message, and recipient email are required' });
     }
@@ -79,7 +147,7 @@ router.post('/send-message', verifyJWT, isHRorAdmin, async (req, res) => {
 router.get('/analytics', verifyJWT, isHRorAdmin, async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
-    
+
     // Build date filter
     let dateFilter = {};
     if (startDate || endDate) {
@@ -104,7 +172,7 @@ router.get('/analytics', verifyJWT, isHRorAdmin, async (req, res) => {
       Application.countDocuments({ ...dateFilter, status: 'reviewed' }),
       Application.countDocuments({ ...dateFilter, status: 'shortlisted' }),
       Application.countDocuments({ ...dateFilter, status: 'rejected' }),
-      
+
       // Applications by job
       Application.aggregate([
         { $match: dateFilter },
@@ -134,7 +202,7 @@ router.get('/analytics', verifyJWT, isHRorAdmin, async (req, res) => {
         { $sort: { count: -1 } },
         { $limit: 10 }
       ]),
-      
+
       // Applications by month
       Application.aggregate([
         { $match: dateFilter },
@@ -149,7 +217,7 @@ router.get('/analytics', verifyJWT, isHRorAdmin, async (req, res) => {
         },
         { $sort: { '_id.year': 1, '_id.month': 1 } }
       ]),
-      
+
       // Average match score
       Application.aggregate([
         { $match: { ...dateFilter, matchScore: { $exists: true } } },
@@ -165,12 +233,12 @@ router.get('/analytics', verifyJWT, isHRorAdmin, async (req, res) => {
     ]);
 
     // Calculate conversion rates
-    const conversionRate = totalApplications > 0 
-      ? Math.round((shortlistedApplications / totalApplications) * 100) 
+    const conversionRate = totalApplications > 0
+      ? Math.round((shortlistedApplications / totalApplications) * 100)
       : 0;
 
-    const responseRate = totalApplications > 0 
-      ? Math.round(((reviewedApplications + shortlistedApplications + rejectedApplications) / totalApplications) * 100) 
+    const responseRate = totalApplications > 0
+      ? Math.round(((reviewedApplications + shortlistedApplications + rejectedApplications) / totalApplications) * 100)
       : 0;
 
     res.json({
@@ -201,7 +269,7 @@ router.get('/analytics', verifyJWT, isHRorAdmin, async (req, res) => {
 router.post('/bulk-update-status', verifyJWT, isHRorAdmin, async (req, res) => {
   try {
     const { applicationIds, status } = req.body;
-    
+
     if (!applicationIds || !Array.isArray(applicationIds) || applicationIds.length === 0) {
       return res.status(400).json({ error: 'Application IDs are required' });
     }
@@ -215,9 +283,9 @@ router.post('/bulk-update-status', verifyJWT, isHRorAdmin, async (req, res) => {
       { status: status }
     );
 
-    res.json({ 
+    res.json({
       message: `${result.modifiedCount} applications updated to ${status}`,
-      modifiedCount: result.modifiedCount 
+      modifiedCount: result.modifiedCount
     });
   } catch (err) {
     console.error('Error in bulk update:', err);
@@ -229,7 +297,7 @@ router.post('/bulk-update-status', verifyJWT, isHRorAdmin, async (req, res) => {
 router.get('/export-applications', verifyJWT, isHRorAdmin, async (req, res) => {
   try {
     const { format = 'csv', jobId, status } = req.query;
-    
+
     // Build filter
     let filter = {};
     if (jobId) filter.job = jobId;
@@ -242,10 +310,10 @@ router.get('/export-applications', verifyJWT, isHRorAdmin, async (req, res) => {
 
     if (format === 'csv') {
       const csvHeaders = [
-        'Name', 'Email', 'Phone', 'Job Title', 'Company', 'Status', 
+        'Name', 'Email', 'Phone', 'Job Title', 'Company', 'Status',
         'Match Score', 'Skills', 'Experience', 'Applied Date'
       ];
-      
+
       const csvRows = applications.map(app => [
         app.name || '',
         app.email || '',
@@ -277,9 +345,54 @@ router.get('/export-applications', verifyJWT, isHRorAdmin, async (req, res) => {
 
 // Employee Management Routes for HR
 router.get('/employees', verifyJWT, isHRorAdmin, getAllEmployees);
+router.get('/employees/:id', verifyJWT, isHRorAdmin, async (req, res) => {
+  try {
+    const Employee = require('../models/Employee');
+    const employee = await Employee.findById(req.params.id)
+      .populate('user', 'name email')
+      .populate('department', 'name');
+    
+    if (!employee) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+    
+    res.json(employee);
+  } catch (error) {
+    console.error('Error fetching employee:', error);
+    res.status(500).json({ error: 'Failed to fetch employee' });
+  }
+});
 router.post('/employees', verifyJWT, isHRorAdmin, createEmployee);
 router.put('/employees/:id', verifyJWT, isHRorAdmin, updateEmployee);
 router.get('/employees/stats', verifyJWT, isHRorAdmin, getEmployeeStats);
+
+// Projects endpoint for HR
+router.get('/projects', verifyJWT, isHRorAdmin, async (req, res) => {
+  try {
+    const Project = require('../models/Project');
+    const projects = await Project.find().limit(100);
+    res.json(projects);
+  } catch (error) {
+    console.error('Error fetching projects:', error);
+    res.status(500).json({ error: 'Failed to fetch projects' });
+  }
+});
+
+// Feedback endpoint for HR
+router.get('/feedback', verifyJWT, isHRorAdmin, async (req, res) => {
+  try {
+    const Feedback = require('../models/Feedback');
+    const feedback = await Feedback.find()
+      .populate('employee', 'user position')
+      .populate('reviewer', 'name')
+      .sort({ createdAt: -1 })
+      .limit(10);
+    res.json(feedback);
+  } catch (error) {
+    console.error('Error fetching feedback:', error);
+    res.status(500).json({ error: 'Failed to fetch feedback' });
+  }
+});
 
 // Payroll Management Routes for HR
 router.get('/payroll', verifyJWT, isHRorAdmin, getAllPayrolls);

@@ -427,8 +427,30 @@ router.get('/debug-users', async (req, res) => {
 
 // --- Logout route ---
 router.post('/logout', (req, res) => {
-  res.clearCookie('auth_token');
-  res.status(200).json({ message: 'Logged out successfully' });
+  try {
+    // Clear all possible cookie variations
+    res.clearCookie('auth_token', { 
+      httpOnly: true, 
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/'
+    });
+    res.clearCookie('token');
+    res.clearCookie('jwt');
+    
+    // If using sessions, destroy them
+    if (req.session) {
+      req.session.destroy((err) => {
+        if (err) console.warn('Session destroy error:', err);
+      });
+    }
+    
+    console.log('✅ User logged out successfully');
+    res.status(200).json({ message: 'Logged out successfully' });
+  } catch (error) {
+    console.error('❌ Logout error:', error);
+    res.status(500).json({ error: 'Logout failed' });
+  }
 });
 
 module.exports = router;
