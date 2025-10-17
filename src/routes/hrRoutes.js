@@ -47,8 +47,8 @@ router.get('/dashboard', verifyJWT, isHRorAdmin, async (req, res) => {
       recentApplications
     ] = await Promise.all([
       Job.countDocuments(),
-      Job.countDocuments({ status: 'open' }),
-      Job.countDocuments({ status: 'closed' }),
+      Job.countDocuments({ status: { $in: ['open', 'active'] } }),
+      Job.countDocuments({ status: { $in: ['closed', 'inactive'] } }),
       Application.countDocuments(),
       Application.find()
         .populate('job', 'title')
