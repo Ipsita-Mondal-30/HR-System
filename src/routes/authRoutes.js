@@ -97,22 +97,19 @@ router.get('/google/callback', (req, res, next) => {
       });
 
       // Redirect to correct frontend URL
-      if (!user.role) {
+      console.log('🔀 Determining redirect for user with role:', user.role);
+
+      if (!user.role || user.role === null || user.role === 'null' || user.role === 'undefined') {
+        console.log('⚠️ User has no valid role, redirecting to role selection');
         return res.redirect(`${FRONTEND_URL}/role-select?token=${token}`);
       }
 
-      switch (user.role) {
-        case 'admin':
-          return res.redirect(`${FRONTEND_URL}/admin/dashboard?token=${token}`);
-        case 'hr':
-          return res.redirect(`${FRONTEND_URL}/hr/dashboard?token=${token}`);
-        case 'candidate':
-          return res.redirect(`${FRONTEND_URL}/candidate/dashboard?token=${token}`);
-        case 'employee':
-          return res.redirect(`${FRONTEND_URL}/employee/dashboard?token=${token}`);
-        default:
-          return res.redirect(`${FRONTEND_URL}/?token=${token}`);
-      }
+      console.log('✅ User has valid role:', user.role, '- redirecting to auth callback');
+
+      // Always redirect to /auth/callback with token
+      // The frontend callback page will handle role-based routing
+      console.log('➡️ Redirecting to auth callback with token');
+      return res.redirect(`${FRONTEND_URL}/auth/callback?token=${token}`);
     } catch (tokenError) {
       console.error('❌ Token generation error:', tokenError);
       res.redirect(`${FRONTEND_URL}/login?error=token_failed&message=${encodeURIComponent('Failed to generate authentication token')}`);
@@ -216,12 +213,20 @@ router.post('/set-role', async (req, res) => {
       }
     } else {
       console.log('👤 User found:', user.name, user.email);
-      console.log('🔄 Updating role from', user.role, 'to', role);
+      console.log('🔄 Current role:', user.role, '| Requested role:', role);
 
+      // Only reset isVerified if changing TO hr role from a different role
+      const wasHR = user.role === 'hr';
       user.role = role;
       user.lastLogin = new Date();
-      if (role === 'hr') {
-        user.isVerified = false; // HR needs verification
+
+      if (role === 'hr' && !wasHR) {
+        // Only set isVerified to false if this is a NEW hr role assignment
+        user.isVerified = false;
+        console.log('⚠️ New HR role assignment - verification required');
+      } else if (role === 'hr' && wasHR) {
+        // Keep existing verification status if already HR
+        console.log('✅ Existing HR user - keeping verification status:', user.isVerified);
       }
 
       await user.save();
@@ -429,22 +434,22 @@ router.get('/debug-users', async (req, res) => {
 router.post('/logout', (req, res) => {
   try {
     // Clear all possible cookie variations
-    res.clearCookie('auth_token', { 
-      httpOnly: true, 
+    res.clearCookie('auth_token', {
+      httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       path: '/'
     });
     res.clearCookie('token');
     res.clearCookie('jwt');
-    
+
     // If using sessions, destroy them
     if (req.session) {
       req.session.destroy((err) => {
         if (err) console.warn('Session destroy error:', err);
       });
     }
-    
+
     console.log('✅ User logged out successfully');
     res.status(200).json({ message: 'Logged out successfully' });
   } catch (error) {
