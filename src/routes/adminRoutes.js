@@ -176,23 +176,44 @@ router.put('/users/:userId/verify', verifyJWT, isHRorAdmin, async (req, res) => 
         const { userId } = req.params;
         const { approved, notes } = req.body;
 
+        console.log('🔍 Verifying user:', userId);
+        console.log('📝 Approved:', approved, 'Notes:', notes);
+
+        // Validate ObjectId
+        const mongoose = require('mongoose');
+        if (!mongoose.Types.ObjectId.isValid(userId)) {
+            console.error('❌ Invalid user ID format:', userId);
+            return res.status(400).json({ error: 'Invalid user ID format' });
+        }
+
+        // Find user first to check if exists
+        const existingUser = await User.findById(userId);
+        if (!existingUser) {
+            console.error('❌ User not found:', userId);
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        console.log('👤 Found user:', existingUser.name, existingUser.email);
+
+        // Update user
         const user = await User.findByIdAndUpdate(
             userId,
             {
-                isVerified: approved,
-                verificationNotes: notes
+                isVerified: approved === true || approved === 'true',
+                verificationNotes: notes || ''
             },
             { new: true }
         ).select('-password');
 
-        if (!user) {
-            return res.status(404).json({ error: 'User not found' });
-        }
-
+        console.log('✅ User verified successfully:', user.name);
         res.json(user);
     } catch (err) {
-        console.error('Error verifying user:', err);
-        res.status(500).json({ error: 'Failed to verify user' });
+        console.error('❌ Error verifying user:', err);
+        console.error('Error stack:', err.stack);
+        res.status(500).json({ 
+            error: 'Failed to verify user',
+            details: err.message 
+        });
     }
 });
 
