@@ -80,13 +80,10 @@ router.get('/me', verifyJWT, async (req, res) => {
 // Get current user's employee profile (alias for /me)
 router.get('/profile', verifyJWT, async (req, res) => {
   console.log('🚀 EMPLOYEE PROFILE ROUTE HIT!');
-  console.log('🔍 ROUTE ENTRY - req.user exists:', !!req.user);
-  console.log('🔍 ROUTE ENTRY - req.user value:', req.user);
-  console.log('🔍 ROUTE ENTRY - typeof req.user:', typeof req.user);
   try {
     console.log('🔍 Full req.user object:', req.user);
     console.log('🔍 req.user._id:', req.user._id);
-    console.log('🔍 req.user keys:', req.user ? Object.keys(req.user) : 'req.user is null/undefined');
+    console.log('🔍 req.user keys:', Object.keys(req.user));
     console.log('🔍 Fetching employee profile for user:', req.user._id);
     
     const employee = await Employee.findOne({ user: req.user._id })

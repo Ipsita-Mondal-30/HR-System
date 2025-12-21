@@ -2,7 +2,6 @@
 const jwt = require('jsonwebtoken');
 
 exports.verifyJWT = (req, res, next) => {
-  console.log('🔥 MIDDLEWARE ENTRY POINT - verifyJWT called');
   try {
     // Check for token in cookies first, then Authorization header
     let token = req.cookies.token;

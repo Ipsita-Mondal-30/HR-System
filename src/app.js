@@ -9,12 +9,7 @@ const expressSession = require('express-session');
 const cookieParser = require('cookie-parser');
 
 // Load environment variables early
-// Load .env.local first for local development, then fallback to .env
-if (require('fs').existsSync('.env.local')) {
-  dotenv.config({ path: '.env.local' });
-} else {
-  dotenv.config();
-}
+dotenv.config();
 
 const {
   PORT = 8080,
