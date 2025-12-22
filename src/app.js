@@ -47,9 +47,21 @@ if (MONGODB_URI) {
 app.use(cookieParser());
 
 // --- Dynamic & Secure CORS ---
+const defaultDevOrigins = [
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'http://localhost:3001',
+  'http://127.0.0.1:3001',
+];
+
+const defaultProdOrigins = [
+  'https://hr-system-x2uf.onrender.com',
+];
+
 const allowedOrigins = [
   ...(CORS_ORIGIN ? CORS_ORIGIN.split(',').map(o => o.trim()) : []),
-  FRONTEND_URL
+  FRONTEND_URL,
+  ...(process.env.NODE_ENV === 'production' ? defaultProdOrigins : defaultDevOrigins),
 ].filter(Boolean);
 
 console.log('✅ Allowed CORS origins:', allowedOrigins);
@@ -59,7 +71,16 @@ app.use(
     origin: function (origin, callback) {
       // Allow requests with no origin (mobile apps, curl, etc.)
       if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) {
+      const hostname = (() => {
+        try { return new URL(origin).hostname; } catch { return ''; }
+      })();
+      const isAllowed =
+        allowedOrigins.includes(origin) ||
+        hostname === 'localhost' ||
+        hostname === '127.0.0.1' ||
+        /vercel\.app$/.test(hostname) ||
+        /onrender\.com$/.test(hostname);
+      if (isAllowed) {
         return callback(null, true);
       } else {
         console.warn('❌ CORS blocked for origin:', origin);

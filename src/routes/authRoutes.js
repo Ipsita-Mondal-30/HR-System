@@ -69,7 +69,9 @@ router.get('/google', passport.authenticate('google', {
 // --- Google OAuth callback ---
 router.get('/google/callback', (req, res, next) => {
   passport.authenticate('google', { session: false }, (err, user, info) => {
-    const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
+    const origin = req.headers.origin || '';
+    const isLocal = origin.includes('localhost:3000') || origin.includes('127.0.0.1:3000');
+    const FRONTEND_URL = isLocal ? 'http://localhost:3000' : (process.env.FRONTEND_URL || "http://localhost:3000");
 
     if (err) {
       console.error('❌ OAuth authentication error:', err);

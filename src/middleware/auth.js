@@ -4,7 +4,7 @@ const jwt = require('jsonwebtoken');
 exports.verifyJWT = (req, res, next) => {
   try {
     // Check for token in cookies first, then Authorization header
-    let token = req.cookies.token;
+    let token = req.cookies.auth_token || req.cookies.token;
     
     console.log('🔐 Auth middleware - Cookies:', req.cookies);
     console.log('🔐 Auth middleware - Headers:', req.headers.authorization);
