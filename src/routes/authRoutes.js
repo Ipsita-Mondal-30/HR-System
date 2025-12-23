@@ -62,16 +62,41 @@ router.post('/login', async (req, res) => {
 });
 
 // --- Google OAuth login ---
-router.get('/google', passport.authenticate('google', {
-  scope: ['profile', 'email']
-}));
+router.get('/google', (req, res, next) => {
+  try {
+    const referer = req.get('referer') || '';
+    const refererOrigin = (() => {
+      try { return referer ? new URL(referer).origin : ''; } catch { return ''; }
+    })();
+    const originHint = req.headers.origin || refererOrigin || req.query.frontend || process.env.FRONTEND_URL || 'http://localhost:3000';
+    // Persist desired frontend for callback
+    res.cookie('frontend_url', originHint, {
+      httpOnly: false,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      maxAge: 10 * 60 * 1000,
+    });
+    // Pass hint via OAuth state
+    passport.authenticate('google', {
+      scope: ['profile', 'email'],
+      state: encodeURIComponent(originHint),
+    })(req, res, next);
+  } catch (e) {
+    console.error('❌ OAuth init error:', e);
+    res.status(500).json({ error: 'Failed to initiate OAuth' });
+  }
+});
 
 // --- Google OAuth callback ---
 router.get('/google/callback', (req, res, next) => {
   passport.authenticate('google', { session: false }, (err, user, info) => {
+    const stateFrontend = (() => {
+      try { return decodeURIComponent(req.query.state || ''); } catch { return ''; }
+    })();
+    const cookieFrontend = req.cookies.frontend_url;
     const origin = req.headers.origin || '';
     const isLocal = origin.includes('localhost:3000') || origin.includes('127.0.0.1:3000');
-    const FRONTEND_URL = isLocal ? 'http://localhost:3000' : (process.env.FRONTEND_URL || "http://localhost:3000");
+    const FRONTEND_URL = stateFrontend || cookieFrontend || (isLocal ? 'http://localhost:3000' : (process.env.FRONTEND_URL || "http://localhost:3000"));
 
     if (err) {
       console.error('❌ OAuth authentication error:', err);
