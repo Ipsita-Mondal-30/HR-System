@@ -78,6 +78,38 @@ exports.generateQuestions = async (req, res) => {
   }
 };
 
+exports.generateAllQuestions = async (req, res) => {
+  try {
+    const candidateId = req.user._id;
+    const applications = await Application.find({ candidate: candidateId }).populate('job', 'title companyName location skills requirements');
+    const jobs = applications.filter(a => a.job).map(a => a.job);
+    const packs = [];
+    for (const job of jobs) {
+      const q = [
+        `Tell me about your experience with ${job.skills?.[0] || 'the required technologies'} and how you've applied it in real projects.`,
+        `Why are you interested in the ${job.title} position at ${job.companyName}?`,
+        `Describe a challenging project you've worked on that relates to this role. What was your approach and what did you learn?`,
+        `How do you stay updated with the latest trends and technologies in ${job.skills?.[0] || 'your field'}?`,
+        `Tell me about a time when you had to work under pressure or meet a tight deadline. How did you handle it?`
+      ];
+      if (job.skills && job.skills.length > 1) {
+        q.push(`How would you approach a problem that requires ${job.skills[1]}? Walk me through your thought process.`);
+      }
+      q.push(`Where do you see yourself in the next 2-3 years, and how does this role fit into your career goals?`);
+      packs.push({
+        jobId: job._id,
+        jobTitle: job.title,
+        companyName: job.companyName,
+        questions: q.slice(0, 7)
+      });
+    }
+    res.json(packs);
+  } catch (error) {
+    console.error('Error generating all questions:', error);
+    res.status(500).json({ error: 'Failed to generate questions for all jobs' });
+  }
+};
+
 /**
  * Submit interview practice session with video recordings
  */

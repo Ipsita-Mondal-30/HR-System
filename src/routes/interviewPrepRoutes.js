@@ -40,6 +40,9 @@ router.get('/applied-jobs', verifyJWT, isCandidate, interviewPrepController.getA
 // Generate interview questions for a specific job
 router.get('/questions/:jobId', verifyJWT, isCandidate, interviewPrepController.generateQuestions);
 
+// Generate interview prep for all applied jobs
+router.get('/all-jobs-prep', verifyJWT, isCandidate, interviewPrepController.generateAllQuestions);
+
 // Submit practice session with recordings
 router.post('/submit', verifyJWT, isCandidate, interviewPrepController.submitPracticeSession);
 

@@ -177,6 +177,8 @@ app.use('/api/departments', require('./routes/departmentRoutes'));
 app.use('/api/roles', require('./routes/roleRoutes'));
 app.use('/api/applications', require('./routes/applicationRoutes'));
 app.use('/api/interviews', require('./routes/interviewRoutes'));
+app.use('/api/interview-prep', require('./routes/interviewPrepRoutes'));
+app.use('/api/video-interview-prep', require('./routes/videoInterviewPrepRoutes'));
 app.use('/api/admin', require('./routes/adminRoutes'));
 app.use('/api/users', require('./routes/userRoutes'));
 app.use('/api/candidate', require('./routes/candidateRoutes'));
