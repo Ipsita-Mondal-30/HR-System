@@ -230,4 +230,93 @@ router.get('/sessions/:sessionId', verifyJWT, async (req, res) => {
   }
 });
 
+router.post('/start-session-v2', verifyJWT, async (req, res) => {
+  try {
+    const { jobId, jobRole, skills = [], experienceLevel = 'mid' } = req.body;
+    const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const session = new VideoInterviewPrep({
+      candidate: req.user._id,
+      job: jobId,
+      jobRole,
+      experienceLevel,
+      skills,
+      sessionId,
+      questions: [],
+      askedCount: 0,
+      maxQuestions: 6
+    });
+    await session.save();
+    const first = await geminiService.decideNextQuestion(jobRole, skills, 'incorrect', 0);
+    session.questions.push({ question: first.question, difficulty: 'easy', timestamp: new Date() });
+    session.askedCount = 1;
+    await session.save();
+    res.json({ spoken_text: first.question, end_interview: false, session_id: session._id });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to start session' });
+  }
+});
+
+router.post('/answer-v2/:sessionId', verifyJWT, async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { transcript } = req.body;
+    const session = await VideoInterviewPrep.findById(sessionId);
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+    const idx = session.askedCount - 1;
+    const current = session.questions[idx];
+    const evaluation = await geminiService.evaluateAnswer(session.jobRole, current.question, transcript || '');
+    current.transcript = transcript || '';
+    current.answer = transcript || '';
+    current.evaluation = evaluation;
+    await session.save();
+    const shouldEnd = session.askedCount >= session.maxQuestions;
+    if (shouldEnd) {
+      const fullTranscript = session.questions.map((q, i) => `Q${i + 1}: ${q.question}\nA${i + 1}: ${q.transcript || q.answer || ''}`).join('\n\n');
+      const analysis = await geminiService.analyzeInterview(session.jobRole, session.questions, fullTranscript);
+      session.fullTranscript = fullTranscript;
+      session.aiAnalysis = analysis;
+      session.status = 'completed';
+      session.completedAt = new Date();
+      await session.save();
+      const score = Math.max(0, Math.min(100, analysis.overallScore || 0));
+      const status = score >= 80 ? 'READY' : score >= 60 ? 'NEEDS PRACTICE' : 'NOT READY';
+      const strengths = analysis.strengths || [];
+      const weaknesses = analysis.improvements || [];
+      const improvement_tips = analysis.recommendations || [];
+      const email_body = `Hi ${req.user.name},\n\nThank you for completing the ${session.jobRole} interview prep.\n\nPrep Score: ${score}/100\n\nStrengths:\n- ${strengths.join('\n- ')}\n\nWeak Areas:\n- ${weaknesses.join('\n- ')}\n\nSuggestions:\n- ${improvement_tips.join('\n- ')}\n\nKeep practicing and feel free to retry the mock interview.\n\nBest,\nTalora Team`;
+      const closing = 'Thank you. This concludes the mock interview.';
+      const { sendEmail } = require('../utils/email');
+      try {
+        await sendEmail({
+          to: req.user.email,
+          subject: `Interview Prep Feedback – ${session.jobRole}`,
+          html: email_body.replace(/\n/g, '<br>')
+        });
+      } catch {}
+      return res.json({
+        spoken_text: closing,
+        end_interview: true,
+        final_output: {
+          prep_score: score,
+          status,
+          strengths,
+          weaknesses,
+          improvement_tips,
+          email_body
+        }
+      });
+    } else {
+      const next = await geminiService.decideNextQuestion(session.jobRole, session.skills || [], evaluation, session.askedCount);
+      session.questions.push({ question: next.question, difficulty: next.difficulty, timestamp: new Date() });
+      session.askedCount += 1;
+      await session.save();
+      return res.json({ spoken_text: next.question, end_interview: false });
+    }
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to process answer' });
+  }
+});
+
 module.exports = router;

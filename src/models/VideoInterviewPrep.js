@@ -14,6 +14,8 @@ const videoInterviewPrepSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  experienceLevel: String,
+  skills: [String],
   sessionId: {
     type: String,
     required: true,
@@ -25,7 +27,15 @@ const videoInterviewPrepSchema = new mongoose.Schema({
     videoUrl: String,
     transcript: String,
     duration: Number,
-    timestamp: Date
+    timestamp: Date,
+    evaluation: {
+      type: String,
+      enum: ['correct', 'partial', 'incorrect']
+    },
+    difficulty: {
+      type: String,
+      enum: ['easy', 'medium', 'hard']
+    }
   }],
   fullTranscript: String,
   aiAnalysis: {
@@ -40,6 +50,14 @@ const videoInterviewPrepSchema = new mongoose.Schema({
     recommendations: [String]
   },
   totalDuration: Number,
+  askedCount: {
+    type: Number,
+    default: 0
+  },
+  maxQuestions: {
+    type: Number,
+    default: 6
+  },
   status: {
     type: String,
     enum: ['in-progress', 'completed', 'failed'],

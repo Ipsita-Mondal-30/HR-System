@@ -78,6 +78,118 @@ Be specific, constructive, and encouraging. Focus on communication, technical kn
     }
   }
 
+  async generateFirstQuestion(jobRole, skills) {
+    try {
+      const skillHint = Array.isArray(skills) && skills.length ? skills.slice(0, 3).join(', ') : 'general skills';
+      const prompt = `You are a friendly interview bot speaking to a candidate.
+
+Job Role: ${jobRole}
+Key Skills: ${skillHint}
+
+Generate ONE easy, welcoming first interview question. Make it conversational and spoken-friendly.
+Return ONLY the question text, nothing else.`;
+
+      const result = await this.model.generateContent(prompt);
+      const response = await result.response;
+      const question = (response.text() || '').trim();
+      
+      return question || `Tell me about yourself and why you're interested in the ${jobRole} position.`;
+    } catch (error) {
+      console.error('Error generating first question:', error);
+      return `Tell me about yourself and why you're interested in the ${jobRole} position.`;
+    }
+  }
+
+  async evaluateAnswer(jobRole, question, answer) {
+    try {
+      const prompt = `Role: ${jobRole}
+
+Question: ${question}
+
+Answer: ${answer}
+
+Classify the answer strictly as one of: "correct", "partial", or "incorrect".
+Return ONLY a JSON object: {"evaluation": "<one of correct|partial|incorrect>"}.`;
+      const result = await this.model.generateContent(prompt);
+      const response = await result.response;
+      const text = response.text();
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        const ev = parsed.evaluation;
+        if (ev === 'correct' || ev === 'partial' || ev === 'incorrect') {
+          return ev;
+        }
+      }
+      return 'partial';
+    } catch {
+      return 'partial';
+    }
+  }
+
+  async analyzeInterviewForEmail(jobRole, questions, fullTranscript) {
+    try {
+      const prompt = `You are an expert interview coach. Analyze this voice interview:
+
+Job Role: ${jobRole}
+
+Interview Transcript:
+${fullTranscript}
+
+Provide analysis in JSON format:
+{
+  "overallScore": <number 0-100>,
+  "strengths": [<3-5 specific strengths>],
+  "improvements": [<3-5 areas to improve>],
+  "recommendations": [<3-5 actionable tips>]
+}
+
+Be specific, constructive, and encouraging.`;
+
+      const result = await this.model.generateContent(prompt);
+      const response = await result.response;
+      const text = response.text();
+
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const analysis = JSON.parse(jsonMatch[0]);
+        return {
+          overallScore: analysis.overallScore || 75,
+          strengths: analysis.strengths || ['Good communication', 'Clear responses'],
+          improvements: analysis.improvements || ['More specific examples', 'Better structure'],
+          recommendations: analysis.recommendations || ['Practice STAR method', 'Prepare examples']
+        };
+      }
+
+      return this.getFallbackAnalysis();
+    } catch (error) {
+      console.error('Error analyzing interview:', error);
+      return this.getFallbackAnalysis();
+    }
+  }
+
+  async decideNextQuestion(jobRole, skills, evaluation, askedCount) {
+    const difficulty = evaluation === 'correct' ? 'hard' : evaluation === 'partial' ? 'medium' : 'easy';
+    const max = 7;
+    const end = askedCount + 1 >= max;
+    try {
+      const skillHint = Array.isArray(skills) && skills.length ? skills.slice(0, 3).join(', ') : 'role-related skills';
+      const prompt = `You are a spoken interviewer.
+Role: ${jobRole}
+Key skills: ${skillHint}
+Difficulty: ${difficulty}
+
+Generate ONE short, spoken-friendly interview question. No explanations. Return ONLY the text of the question.`;
+      const result = await this.model.generateContent(prompt);
+      const response = await result.response;
+      const question = (response.text() || '').trim();
+      return { question: question || `Tell me about a recent ${jobRole} challenge and your approach.`, difficulty, endInterview: end };
+    } catch {
+      const fallback = this.getFallbackQuestions(jobRole, 1)[0];
+      return { question: fallback, difficulty, endInterview: end };
+    }
+  }
+
   getFallbackQuestions(jobRole, count) {
     const genericQuestions = [
       `Tell me about your experience relevant to the ${jobRole} position.`,
