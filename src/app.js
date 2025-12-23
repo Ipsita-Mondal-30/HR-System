@@ -7,9 +7,24 @@ const dotenv = require('dotenv');
 const passport = require('passport');
 const expressSession = require('express-session');
 const cookieParser = require('cookie-parser');
+const fs = require('fs');
+const path = require('path');
 
 // Load environment variables early
-dotenv.config();
+(() => {
+  try {
+    dotenv.config();
+    const envLocalBackend = path.join(__dirname, '../.env.local');
+    const envLocalRoot = path.join(__dirname, '../../.env.local');
+    if (fs.existsSync(envLocalBackend)) {
+      dotenv.config({ path: envLocalBackend, override: true });
+    } else if (fs.existsSync(envLocalRoot)) {
+      dotenv.config({ path: envLocalRoot, override: true });
+    }
+  } catch {
+    dotenv.config();
+  }
+})();
 
 const {
   PORT = 8080,

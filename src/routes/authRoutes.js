@@ -35,11 +35,12 @@ router.post('/login', async (req, res) => {
     );
     
     // Set cookie
+    const isSecure = req.secure || req.headers['x-forwarded-proto'] === 'https';
     res.cookie('auth_token', token, {
-      httpOnly: false, // Allow client-side access
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+      httpOnly: false,
+      secure: isSecure,
+      sameSite: isSecure ? 'none' : 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000
     });
     
     console.log('✅ Manual login successful for:', user.name);
@@ -70,10 +71,11 @@ router.get('/google', (req, res, next) => {
     })();
     const originHint = req.headers.origin || refererOrigin || req.query.frontend || process.env.FRONTEND_URL || 'http://localhost:3000';
     // Persist desired frontend for callback
+    const isSecure = req.secure || req.headers['x-forwarded-proto'] === 'https';
     res.cookie('frontend_url', originHint, {
       httpOnly: false,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      secure: isSecure,
+      sameSite: isSecure ? 'none' : 'lax',
       maxAge: 10 * 60 * 1000,
     });
     // Pass hint via OAuth state
@@ -116,10 +118,11 @@ router.get('/google/callback', (req, res, next) => {
       );
 
       // Set cookie
+      const isSecure = req.secure || req.headers['x-forwarded-proto'] === 'https';
       res.cookie('auth_token', token, {
         httpOnly: false,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+        secure: isSecure,
+        sameSite: isSecure ? 'none' : 'lax',
         maxAge: 7 * 24 * 60 * 60 * 1000
       });
 
@@ -287,11 +290,12 @@ router.post('/set-role', async (req, res) => {
     );
 
     // Set new cookie with updated token
+    const isSecure = req.secure || req.headers['x-forwarded-proto'] === 'https';
     res.cookie('auth_token', newToken, {
       httpOnly: false,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+      secure: isSecure,
+      sameSite: isSecure ? 'none' : 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000
     });
 
     console.log('✅ Role set successfully for:', user.name);
