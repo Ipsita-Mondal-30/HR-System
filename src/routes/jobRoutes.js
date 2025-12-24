@@ -101,10 +101,27 @@ router.get('/salary-data', async (req, res) => {
       return res.json([]);
     }
     
+    // Filter jobs by experience if provided (before grouping)
+    let filteredJobs = jobs;
+    if (experience) {
+      const expNum = parseInt(experience);
+      if (!isNaN(expNum)) {
+        filteredJobs = jobs.filter(job => {
+          const jobExp = job.experienceRequired || 0;
+          if (expNum === 0) return jobExp <= 2; // 0-2 years
+          if (expNum === 3) return jobExp >= 3 && jobExp <= 5; // 3-5 years
+          if (expNum === 5) return jobExp >= 5 && jobExp <= 8; // 5-8 years
+          if (expNum === 8) return jobExp >= 8; // 8+ years
+          return jobExp <= expNum;
+        });
+        console.log(`📊 Filtered to ${filteredJobs.length} jobs matching experience: ${experience} years`);
+      }
+    }
+    
     // Group jobs by role and location to calculate salary ranges
     const salaryGroups = {};
     
-    jobs.forEach(job => {
+    filteredJobs.forEach(job => {
       const key = `${job.title.toLowerCase()}-${job.location?.toLowerCase() || 'remote'}`;
       
       if (!salaryGroups[key]) {
@@ -121,9 +138,11 @@ router.get('/salary-data', async (req, res) => {
       salaryGroups[key].companies.add(job.companyName);
     });
     
-    // Calculate salary statistics for each group
+    // Calculate salary statistics for each group (jobs already filtered above)
     const salaryData = Object.values(salaryGroups).map(group => {
       const salaries = group.salaries.sort((a, b) => a - b);
+      if (salaries.length === 0) return null;
+      
       const minSalary = Math.min(...salaries);
       const maxSalary = Math.max(...salaries);
       const avgSalary = Math.round(salaries.reduce((sum, sal) => sum + sal, 0) / salaries.length);
@@ -143,7 +162,7 @@ router.get('/salary-data', async (req, res) => {
         avgSalary,
         companies: Array.from(group.companies).slice(0, 4) // Limit to 4 companies
       };
-    });
+    }).filter(Boolean); // Remove null entries
     
     console.log(`📊 Returning ${salaryData.length} salary data points`);
     res.json(salaryData);

@@ -102,61 +102,81 @@ class EmailService {
       const statusColor = status === 'READY' ? '#059669' : status === 'NEEDS PRACTICE' ? '#f59e0b' : '#dc2626';
       const statusEmoji = status === 'READY' ? '✅' : status === 'NEEDS PRACTICE' ? '⚠️' : '📚';
 
+      const scorePercentage = score;
+      const scoreColor = score >= 80 ? '#059669' : score >= 60 ? '#f59e0b' : '#dc2626';
+      
       const htmlContent = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-          <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
-            <h1 style="color: white; margin: 0;">🎙️ Voice Interview Prep Feedback</h1>
+        <div style="font-family: Arial, sans-serif; max-width: 650px; margin: 0 auto; padding: 20px;">
+          <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 35px; border-radius: 10px 10px 0 0; text-align: center;">
+            <h1 style="color: white; margin: 0; font-size: 28px;">🎙️ Your Voice Interview Prep Results</h1>
           </div>
           
-          <div style="background: white; padding: 30px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 10px 10px;">
-            <p style="font-size: 16px; color: #374151;">Hi <strong>${candidateName}</strong>,</p>
-            <p style="color: #6b7280;">Thank you for completing the voice interview preparation for <strong style="color: #4f46e5;">${jobRole}</strong>!</p>
+          <div style="background: white; padding: 35px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 10px 10px;">
+            <p style="font-size: 18px; color: #374151; margin-bottom: 10px;">Hi <strong>${candidateName}</strong>,</p>
+            <p style="color: #6b7280; font-size: 16px; line-height: 1.6; margin-bottom: 30px;">
+              Thank you for completing the voice interview preparation for <strong style="color: #4f46e5;">${jobRole}</strong>! 
+              Below is your detailed feedback and score.
+            </p>
             
-            <div style="background: #f3f4f6; padding: 25px; border-radius: 8px; margin: 25px 0; text-align: center;">
-              <div style="display: inline-block; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px 40px; border-radius: 50px; margin-bottom: 20px;">
-                <div style="font-size: 36px; font-weight: bold;">${score}/100</div>
-                <div style="font-size: 14px; margin-top: 5px;">Prep Score</div>
+            <!-- Score Card -->
+            <div style="background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%); padding: 30px; border-radius: 12px; margin: 30px 0; text-align: center; border: 2px solid ${scoreColor};">
+              <div style="margin-bottom: 20px;">
+                <div style="display: inline-block; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 25px 50px; border-radius: 60px;">
+                  <div style="font-size: 48px; font-weight: bold; line-height: 1;">${score}</div>
+                  <div style="font-size: 16px; margin-top: 8px; opacity: 0.95;">out of 100</div>
+                </div>
               </div>
               
-              <div style="display: inline-block; background: ${statusColor}; color: white; padding: 12px 30px; border-radius: 50px; font-size: 18px; font-weight: bold;">
+              <div style="display: inline-block; background: ${statusColor}; color: white; padding: 14px 35px; border-radius: 50px; font-size: 18px; font-weight: bold; margin-top: 15px;">
                 ${statusEmoji} ${status}
               </div>
             </div>
             
-            <div style="background: white; padding: 20px; border-radius: 8px; margin: 15px 0; border: 2px solid #10b981;">
-              <h3 style="color: #059669; margin-top: 0;">✓ Your Strengths:</h3>
-              <ul style="color: #374151; line-height: 1.8;">
-                ${strengths.map(s => `<li>${s}</li>`).join('')}
+            <!-- Strengths Section -->
+            <div style="background: #f0fdf4; padding: 25px; border-radius: 10px; margin: 25px 0; border-left: 5px solid #10b981;">
+              <h3 style="color: #059669; margin-top: 0; margin-bottom: 15px; font-size: 20px; font-weight: bold;">✓ What You Did Well</h3>
+              <ul style="color: #374151; line-height: 2; margin: 0; padding-left: 20px;">
+                ${strengths.map(s => `<li style="margin-bottom: 8px;">${s}</li>`).join('')}
               </ul>
             </div>
             
-            <div style="background: white; padding: 20px; border-radius: 8px; margin: 15px 0; border: 2px solid #f59e0b;">
-              <h3 style="color: #d97706; margin-top: 0;">→ Weak Areas:</h3>
-              <ul style="color: #374151; line-height: 1.8;">
-                ${weaknesses.map(w => `<li>${w}</li>`).join('')}
+            <!-- Weaknesses Section -->
+            <div style="background: #fffbeb; padding: 25px; border-radius: 10px; margin: 25px 0; border-left: 5px solid #f59e0b;">
+              <h3 style="color: #d97706; margin-top: 0; margin-bottom: 15px; font-size: 20px; font-weight: bold;">→ Areas to Improve</h3>
+              <ul style="color: #374151; line-height: 2; margin: 0; padding-left: 20px;">
+                ${weaknesses.map(w => `<li style="margin-bottom: 8px;">${w}</li>`).join('')}
               </ul>
             </div>
             
-            <div style="background: white; padding: 20px; border-radius: 8px; margin: 15px 0; border: 2px solid #3b82f6;">
-              <h3 style="color: #2563eb; margin-top: 0;">💡 Learning Suggestions:</h3>
-              <ul style="color: #374151; line-height: 1.8;">
-                ${improvementTips.map(tip => `<li>${tip}</li>`).join('')}
+            <!-- Recommendations Section -->
+            <div style="background: #eff6ff; padding: 25px; border-radius: 10px; margin: 25px 0; border-left: 5px solid #3b82f6;">
+              <h3 style="color: #2563eb; margin-top: 0; margin-bottom: 15px; font-size: 20px; font-weight: bold;">💡 Actionable Tips to Improve</h3>
+              <ul style="color: #374151; line-height: 2; margin: 0; padding-left: 20px;">
+                ${improvementTips.map(tip => `<li style="margin-bottom: 8px;">${tip}</li>`).join('')}
               </ul>
             </div>
             
-            <div style="background: #eff6ff; padding: 20px; border-radius: 8px; border-left: 4px solid #3b82f6; margin-top: 30px;">
-              <p style="margin: 0; color: #1e40af; font-weight: bold;">🎯 Next Steps:</p>
-              <ul style="color: #374151; line-height: 1.6; margin: 10px 0 0 0;">
-                <li>Review the feedback and work on weak areas</li>
-                <li>Practice more interviews to improve your score</li>
-                <li>Research the company and role thoroughly</li>
-                <li>Feel free to retry the interview prep anytime!</li>
+            <!-- Next Steps Section -->
+            <div style="background: #f8fafc; padding: 25px; border-radius: 10px; border: 2px solid #e2e8f0; margin-top: 30px;">
+              <p style="margin: 0 0 15px 0; color: #1e293b; font-weight: bold; font-size: 18px;">🎯 Recommended Next Steps</p>
+              <ul style="color: #475569; line-height: 1.8; margin: 0; padding-left: 20px;">
+                <li style="margin-bottom: 10px;"><strong>Practice more:</strong> Retake this interview prep to improve your score</li>
+                <li style="margin-bottom: 10px;"><strong>Focus on weak areas:</strong> Review the improvement suggestions above</li>
+                <li style="margin-bottom: 10px;"><strong>Research thoroughly:</strong> Learn more about ${jobRole} roles and requirements</li>
+                <li style="margin-bottom: 10px;"><strong>Prepare examples:</strong> Use the STAR method (Situation, Task, Action, Result)</li>
               </ul>
             </div>
             
-            <div style="margin-top: 30px; padding-top: 20px; border-top: 2px solid #e5e7eb; text-align: center;">
-              <p style="color: #6b7280; margin: 10px 0;">Keep practicing and good luck with your interviews!</p>
-              <p style="color: #374151; font-weight: bold; margin: 10px 0;">Best regards,<br>The Talora Team</p>
+            <!-- Footer -->
+            <div style="margin-top: 40px; padding-top: 25px; border-top: 2px solid #e5e7eb; text-align: center;">
+              <p style="color: #64748b; margin: 15px 0; font-size: 15px; line-height: 1.6;">
+                Keep practicing and good luck with your interviews!<br>
+                You can retry this interview prep anytime to improve your score.
+              </p>
+              <p style="color: #374151; font-weight: bold; margin: 15px 0; font-size: 16px;">
+                Best regards,<br>
+                <span style="color: #667eea;">The Talora Team</span>
+              </p>
             </div>
           </div>
         </div>

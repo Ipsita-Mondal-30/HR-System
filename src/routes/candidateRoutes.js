@@ -738,38 +738,131 @@ router.get('/profile-analysis', verifyJWT, isCandidate, async (req, res) => {
     const applications = await Application.find({ candidate: candidateId })
       .populate('job', 'title skills requirements')
       .sort({ createdAt: -1 })
-      .limit(3);
-
-    const agent = require('../controllers/agentController');
-
-    const analysisPrompt = `Analyze this candidate profile and provide insights:
-
-    Candidate Profile:
-    - Name: ${user.name}
-    - Skills: ${user.skills?.join(', ') || 'Not specified'}
-    - Experience: ${user.experience || 'Not specified'}
-    - Education: ${user.education || 'Not specified'}
-    - Bio: ${user.bio || 'Not specified'}
-    - Portfolio: ${user.portfolioUrl ? 'Available' : 'Not provided'}
-    - LinkedIn: ${user.linkedInUrl ? 'Available' : 'Not provided'}
-    - GitHub: ${user.githubUrl ? 'Available' : 'Not provided'}
-
-    Recent Applications: ${applications.map(app => app.job?.title).join(', ') || 'None'}
-
-    Provide a JSON response with:
-    1. "overallScore": Overall profile strength (1-100)
-    2. "strengths": Array of key strengths
-    3. "improvements": Array of areas to improve
-    4. "marketability": Assessment of job market appeal
-    5. "recommendations": Specific actionable recommendations
-    6. "roleAlignment": How well profile matches target roles
-
-    Be constructive and specific.`;
-
-    // Generate profile analysis with smart fallbacks
-    console.log('🔍 Generating profile analysis...');
+      .limit(5);
 
     const completeness = calculateProfileCompleteness(user);
+    
+    // Try Gemini first, then Cohere, then fallback
+    let analysis = null;
+    
+    // Try Gemini
+    try {
+      const geminiService = require('../services/geminiService');
+      const profileContext = `
+Candidate Profile:
+- Name: ${user.name}
+- Email: ${user.email}
+- Skills: ${user.skills?.join(', ') || 'Not specified'}
+- Experience: ${user.experience || 'Not specified'}
+- Education: ${user.education || 'Not specified'}
+- Bio: ${user.bio || 'Not specified'}
+- Portfolio: ${user.portfolioUrl || 'Not provided'}
+- LinkedIn: ${user.linkedInUrl || 'Not provided'}
+- GitHub: ${user.githubUrl || 'Not provided'}
+- Resume: ${user.resumeUrl ? 'Uploaded' : 'Not uploaded'}
+- Profile Completeness: ${completeness}%
+
+Recent Job Applications: ${applications.map(app => `${app.job?.title} at ${app.job?.companyName || 'Company'}`).join(', ') || 'None'}
+
+Target Roles: ${applications.map(app => app.job?.title).filter((v, i, a) => a.indexOf(v) === i).join(', ') || 'Not specified'}
+      `.trim();
+
+      const analysisPrompt = `You are an expert career coach and recruiter analyzing a candidate's profile.
+
+${profileContext}
+
+Provide a comprehensive profile analysis in JSON format:
+{
+  "overallScore": <number 1-100, overall profile strength>,
+  "strengths": [<array of 4-6 specific strengths - what they have that's strong>],
+  "improvements": [<array of 4-6 specific areas to improve - be constructive>],
+  "marketability": "<2-3 sentence assessment of their job market appeal>",
+  "recommendations": [<array of 5-7 actionable, specific recommendations>],
+  "roleAlignment": "<2-3 sentence assessment of how well profile matches their target roles>"
+}
+
+IMPORTANT:
+- overallScore should reflect actual profile quality (not just completeness)
+- Be SPECIFIC and constructive (not generic)
+- Reference actual skills, experience, and applications
+- Provide actionable recommendations
+- Marketability should assess their attractiveness to employers
+
+Return ONLY valid JSON, no other text.`;
+
+      const { GoogleGenerativeAI } = require('@google/generative-ai');
+      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+      const geminiModel = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+      const result = await geminiModel.generateContent(analysisPrompt);
+      const response = await result.response;
+      const text = response.text();
+      
+      // Parse JSON
+      let jsonMatch = text.match(/\{[\s\S]*?\}/);
+      if (!jsonMatch) {
+        jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
+        if (jsonMatch) jsonMatch = [jsonMatch[1]];
+      }
+      
+      if (jsonMatch) {
+        analysis = JSON.parse(jsonMatch[0]);
+        console.log('✅ Profile analysis generated with Gemini');
+      }
+    } catch (geminiError) {
+      console.log('⚠️ Gemini failed, trying Cohere...', geminiError.message);
+      
+      // Try Cohere
+      try {
+        const { CohereClient } = require('cohere-ai');
+        const cohere = new CohereClient({ token: process.env.COHERE_API_KEY });
+        
+        const profileText = `
+Candidate: ${user.name}
+Skills: ${user.skills?.join(', ') || 'Not specified'}
+Experience: ${user.experience || 'Not specified'}
+Education: ${user.education || 'Not specified'}
+Bio: ${user.bio || 'Not specified'}
+Portfolio: ${user.portfolioUrl ? 'Yes' : 'No'}
+LinkedIn: ${user.linkedInUrl ? 'Yes' : 'No'}
+GitHub: ${user.githubUrl ? 'Yes' : 'No'}
+Resume: ${user.resumeUrl ? 'Yes' : 'No'}
+Target Roles: ${applications.map(app => app.job?.title).filter((v, i, a) => a.indexOf(v) === i).join(', ') || 'Not specified'}
+        `.trim();
+
+        const coherePrompt = `Analyze this candidate profile and provide a JSON response:
+
+${profileText}
+
+Return JSON with:
+{
+  "overallScore": <1-100>,
+  "strengths": [<array of strengths>],
+  "improvements": [<array of improvements>],
+  "marketability": "<assessment>",
+  "recommendations": [<array of recommendations>],
+  "roleAlignment": "<assessment>"
+}
+
+Be specific and constructive.`;
+
+        const response = await cohere.chat({
+          message: coherePrompt,
+          model: 'command-r',
+          temperature: 0.7
+        });
+        
+        const responseText = response.text;
+        const jsonMatch = responseText.match(/\{[\s\S]*?\}/);
+        if (jsonMatch) {
+          analysis = JSON.parse(jsonMatch[0]);
+          console.log('✅ Profile analysis generated with Cohere');
+        }
+      } catch (cohereError) {
+        console.log('⚠️ Cohere failed, using fallback...', cohereError.message);
+      }
+    }
+
+    // Use AI analysis if available, otherwise use enhanced fallback
     const hasResume = !!user.resumeUrl;
     const hasSkills = user.skills && user.skills.length > 0;
     const hasExperience = !!user.experience;
@@ -777,81 +870,121 @@ router.get('/profile-analysis', verifyJWT, isCandidate, async (req, res) => {
     const hasLinkedIn = !!user.linkedInUrl;
     const hasGitHub = !!user.githubUrl;
 
-    // Smart analysis based on profile data
-    const strengths = [];
-    const improvements = [];
-    const recommendations = [];
-
-    // Analyze strengths
-    if (hasResume) strengths.push('Professional resume uploaded');
-    if (hasSkills) strengths.push(`Technical skills defined (${user.skills.length} skills)`);
-    if (hasExperience) strengths.push('Work experience documented');
-    if (hasPortfolio) strengths.push('Portfolio showcasing work');
-    if (hasLinkedIn) strengths.push('Professional LinkedIn presence');
-    if (hasGitHub) strengths.push('Active GitHub profile');
-    if (user.education) strengths.push('Educational background provided');
-
-    // Analyze improvements
-    if (!hasResume) improvements.push('Upload a professional resume');
-    if (!hasSkills || user.skills.length < 3) improvements.push('Add more technical skills');
-    if (!hasExperience) improvements.push('Add work experience details');
-    if (!hasPortfolio) improvements.push('Create a portfolio to showcase projects');
-    if (!hasLinkedIn) improvements.push('Connect LinkedIn profile');
-    if (!hasGitHub) improvements.push('Link GitHub profile for code samples');
-    if (!user.bio) improvements.push('Add a professional bio/summary');
-
-    // Generate recommendations
-    if (completeness < 50) {
-      recommendations.push('Focus on completing basic profile information first');
-      recommendations.push('Upload your resume to significantly boost your profile');
-    } else if (completeness < 80) {
-      recommendations.push('Add portfolio projects to showcase your skills');
-      recommendations.push('Connect your professional social media profiles');
+    let profileAnalysis;
+    
+    if (analysis && typeof analysis.overallScore === 'number') {
+      // Use AI-generated analysis
+      profileAnalysis = {
+        overallScore: Math.max(1, Math.min(100, analysis.overallScore)),
+        strengths: Array.isArray(analysis.strengths) ? analysis.strengths : [],
+        improvements: Array.isArray(analysis.improvements) ? analysis.improvements : [],
+        marketability: analysis.marketability || 'Good foundation with room for growth',
+        recommendations: Array.isArray(analysis.recommendations) ? analysis.recommendations : [],
+        roleAlignment: analysis.roleAlignment || 'Developing alignment with target roles',
+        profileCompleteness: completeness,
+        lastUpdated: user.updatedAt || user.createdAt,
+        generatedAt: new Date().toISOString(),
+        insights: {
+          hasResume,
+          skillsCount: user.skills?.length || 0,
+          hasExperience,
+          hasPortfolio,
+          socialProfiles: [hasLinkedIn, hasGitHub].filter(Boolean).length,
+          recentApplications: applications.length
+        }
+      };
     } else {
-      recommendations.push('Your profile is strong! Keep it updated with recent projects');
-      recommendations.push('Consider adding certifications or additional skills');
-    }
+      // Enhanced fallback analysis
+      const strengths = [];
+      const improvements = [];
+      const recommendations = [];
 
-    // Determine marketability
-    let marketability;
-    if (completeness >= 90) {
-      marketability = 'Excellent market presence - highly attractive to employers';
-    } else if (completeness >= 70) {
-      marketability = 'Strong market presence with good employer appeal';
-    } else if (completeness >= 50) {
-      marketability = 'Moderate market presence - some improvements needed';
-    } else {
-      marketability = 'Developing market presence - significant improvements recommended';
-    }
-
-    // Role alignment assessment
-    let roleAlignment;
-    const targetRoles = applications.map(app => app.job?.title).filter(Boolean);
-    if (targetRoles.length > 0) {
-      roleAlignment = `Targeting ${targetRoles[0]} roles - ${hasSkills && hasExperience ? 'good' : 'developing'} alignment`;
-    } else {
-      roleAlignment = 'No recent applications - consider applying to relevant positions';
-    }
-
-    const profileAnalysis = {
-      overallScore: completeness,
-      strengths: strengths.length > 0 ? strengths : ['Professional foundation established'],
-      improvements: improvements.length > 0 ? improvements : ['Profile is well-developed'],
-      marketability,
-      recommendations,
-      roleAlignment,
-      profileCompleteness: completeness,
-      lastUpdated: user.updatedAt || user.createdAt,
-      generatedAt: new Date().toISOString(),
-      insights: {
-        hasResume,
-        skillsCount: user.skills?.length || 0,
-        hasExperience,
-        hasPortfolio,
-        socialProfiles: [hasLinkedIn, hasGitHub].filter(Boolean).length,
-        recentApplications: applications.length
+      // Analyze strengths with more detail
+      if (hasResume) strengths.push('Professional resume uploaded and accessible to employers');
+      if (hasSkills) {
+        const skillCount = user.skills.length;
+        strengths.push(`Strong technical foundation with ${skillCount} skill${skillCount > 1 ? 's' : ''} defined: ${user.skills.slice(0, 3).join(', ')}${skillCount > 3 ? '...' : ''}`);
       }
-    };
+      if (hasExperience) strengths.push('Work experience documented, showing career progression');
+      if (hasPortfolio) strengths.push('Portfolio showcasing projects and technical capabilities');
+      if (hasLinkedIn) strengths.push('Professional LinkedIn presence for networking');
+      if (hasGitHub) strengths.push('Active GitHub profile demonstrating coding ability');
+      if (user.education) strengths.push(`Educational background: ${user.education}`);
+      if (user.bio) strengths.push('Professional bio/summary providing context');
+
+      // Analyze improvements with specific guidance
+      if (!hasResume) improvements.push('Upload a professional resume - this significantly improves your profile visibility');
+      if (!hasSkills || user.skills.length < 5) {
+        improvements.push(`Add more technical skills (currently ${user.skills?.length || 0} skills) - aim for 5-10 relevant skills`);
+      }
+      if (!hasExperience) improvements.push('Add detailed work experience including company names, roles, and key achievements');
+      if (!hasPortfolio) improvements.push('Create a portfolio showcasing 2-3 of your best projects with descriptions');
+      if (!hasLinkedIn) improvements.push('Connect your LinkedIn profile to enhance professional credibility');
+      if (!hasGitHub) improvements.push('Link your GitHub profile to showcase code samples and project repositories');
+      if (!user.bio) improvements.push('Add a compelling professional bio (2-3 sentences) highlighting your expertise and career goals');
+
+      // Generate targeted recommendations based on profile state
+      if (completeness < 50) {
+        recommendations.push('Priority: Complete basic profile information - upload resume, add skills, and experience');
+        recommendations.push('Upload your resume first - this is the most important profile element');
+        recommendations.push('Add at least 5 technical skills relevant to your target roles');
+      } else if (completeness < 80) {
+        recommendations.push('Enhance your profile by adding portfolio projects that demonstrate your skills');
+        recommendations.push('Connect your professional social media profiles (LinkedIn, GitHub) for credibility');
+        recommendations.push('Write a compelling bio that summarizes your expertise and career objectives');
+        recommendations.push('Keep your skills list updated with the latest technologies in your field');
+      } else {
+        recommendations.push('Your profile is strong! Keep it updated with recent projects and achievements');
+        recommendations.push('Consider adding certifications, publications, or speaking engagements if applicable');
+        recommendations.push('Regularly update your skills to reflect current industry trends');
+        recommendations.push('Maintain active engagement on LinkedIn and GitHub to show ongoing professional development');
+      }
+
+      // Enhanced marketability assessment
+      let marketability;
+      const strongIndicators = [hasResume, hasSkills && user.skills.length >= 5, hasExperience, hasPortfolio || hasGitHub].filter(Boolean).length;
+      
+      if (completeness >= 90 && strongIndicators >= 3) {
+        marketability = 'Excellent market presence - highly attractive to employers with strong professional foundation';
+      } else if (completeness >= 70 && strongIndicators >= 2) {
+        marketability = 'Strong market presence with good employer appeal - well-positioned for opportunities';
+      } else if (completeness >= 50) {
+        marketability = 'Moderate market presence - completing key profile elements will significantly improve attractiveness';
+      } else {
+        marketability = 'Developing market presence - focus on completing essential profile elements (resume, skills, experience)';
+      }
+
+      // Enhanced role alignment assessment
+      let roleAlignment;
+      const targetRoles = applications.map(app => app.job?.title).filter((v, i, a) => a.indexOf(v) === i);
+      if (targetRoles.length > 0) {
+        const primaryRole = targetRoles[0];
+        const roleMatch = hasSkills && hasExperience ? 'strong' : hasSkills || hasExperience ? 'developing' : 'needs improvement';
+        roleAlignment = `Targeting ${primaryRole} roles with ${roleMatch} alignment - ${hasSkills && hasExperience ? 'your skills and experience align well' : hasSkills ? 'add more experience details' : hasExperience ? 'highlight relevant technical skills' : 'focus on building relevant skills and experience'}`;
+      } else {
+        roleAlignment = 'No recent applications - consider applying to positions that match your skills and career goals';
+      }
+
+      profileAnalysis = {
+        overallScore: Math.max(completeness - 10, Math.min(completeness + 10, completeness + (strongIndicators * 5))), // Adjusted score based on quality indicators
+        strengths: strengths.length > 0 ? strengths : ['Professional foundation established'],
+        improvements: improvements.length > 0 ? improvements : ['Profile is well-developed'],
+        marketability,
+        recommendations,
+        roleAlignment,
+        profileCompleteness: completeness,
+        lastUpdated: user.updatedAt || user.createdAt,
+        generatedAt: new Date().toISOString(),
+        insights: {
+          hasResume,
+          skillsCount: user.skills?.length || 0,
+          hasExperience,
+          hasPortfolio,
+          socialProfiles: [hasLinkedIn, hasGitHub].filter(Boolean).length,
+          recentApplications: applications.length
+        }
+      };
+    }
 
     console.log('✅ Profile analysis generated successfully');
     res.json(profileAnalysis);

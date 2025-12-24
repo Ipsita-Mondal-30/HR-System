@@ -24,9 +24,29 @@ const voiceInterviewSchema = new mongoose.Schema({
       type: String,
       enum: ['correct', 'partial', 'incorrect']
     },
+    penalty: {
+      type: Number,
+      default: 10,
+      min: 0,
+      max: 20
+    },
     difficulty: {
       type: String,
       enum: ['easy', 'medium', 'hard']
+    },
+    bodyLanguage: {
+      eye_contact: {
+        type: String,
+        enum: ['high', 'medium', 'low']
+      },
+      movement: {
+        type: String,
+        enum: ['low', 'medium', 'high']
+      },
+      posture: {
+        type: String,
+        enum: ['stable', 'unstable']
+      }
     },
     timestamp: Date
   }],
