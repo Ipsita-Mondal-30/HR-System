@@ -70,6 +70,38 @@ router.post('/start', verifyJWT, async (req, res) => {
   }
 });
 
+// Resume in-progress interview
+router.get('/resume', verifyJWT, async (req, res) => {
+  try {
+    // Find the most recent in-progress session for this candidate
+    const session = await VoiceInterview.findOne({
+      candidate: req.user._id,
+      status: 'in-progress'
+    }).sort({ createdAt: -1 }).populate('job', '_id title');
+
+    if (!session) {
+      return res.json({ hasResumeSession: false });
+    }
+
+    // Get the current question (the one they haven't answered yet)
+    const currentQuestionIndex = session.askedCount - 1;
+    const currentQuestion = session.questions[currentQuestionIndex]?.question || '';
+
+    res.json({
+      hasResumeSession: true,
+      sessionId: session._id,
+      jobRole: session.jobRole,
+      jobId: session.job ? session.job._id.toString() : null,
+      currentQuestion,
+      questionCount: session.askedCount,
+      totalQuestions: session.maxQuestions
+    });
+  } catch (error) {
+    console.error('❌ Error checking resume session:', error);
+    res.status(500).json({ error: 'Failed to check resume session' });
+  }
+});
+
 // Process spoken answer and get next question
 router.post('/answer/:sessionId', verifyJWT, async (req, res) => {
   try {
@@ -80,7 +112,7 @@ router.post('/answer/:sessionId', verifyJWT, async (req, res) => {
 
     const session = await VoiceInterview.findById(sessionId);
     if (!session) {
-      return res.status(404).json({ error: 'Session not found' });
+      return res.status(404).json({ error: 'Session not found', needsRepetition: true });
     }
 
     // Store transcript for current question
@@ -136,6 +168,18 @@ router.post('/answer/:sessionId', verifyJWT, async (req, res) => {
       const score = Math.max(0, Math.min(100, analysis.overallScore || 0));
       const status = score >= 80 ? 'READY' : score >= 60 ? 'NEEDS PRACTICE' : 'NOT READY';
 
+      // Create notification for interview completed
+      try {
+        const notificationService = require('../services/notificationService');
+        await notificationService.notifyInterviewCompleted(
+          req.user._id,
+          session._id,
+          session.jobRole
+        );
+      } catch (notifError) {
+        console.error('Failed to create interview completion notification:', notifError);
+      }
+
       // Send email
       const user = await User.findById(req.user._id);
       await emailService.sendVoiceInterviewFeedback(
@@ -146,7 +190,9 @@ router.post('/answer/:sessionId', verifyJWT, async (req, res) => {
         status,
         analysis.strengths || [],
         analysis.improvements || [],
-        analysis.recommendations || []
+        analysis.recommendations || [],
+        analysis.resources || [],
+        analysis.courses || []
       );
 
       console.log('✅ Interview completed and email sent');
@@ -191,15 +237,28 @@ router.post('/answer/:sessionId', verifyJWT, async (req, res) => {
         adjustedEvaluation = 'correct'; // Keep harder path
       }
       
-      // Pass sessionId and previousQuestions to prevent duplicates
+      // Check if candidate said "I don't know" - provide hint
+      const evalResultNeedsHint = evalResult.needsHint;
+      if (evalResultNeedsHint && evalResult.hint) {
+        // Return hint as the next "question" so AI can reassure them
+        return res.json({
+          endInterview: false,
+          nextQuestion: evalResult.hint,
+          isHint: true
+        });
+      }
+
+      // Pass sessionId, previousQuestions, and previousAnswer for conversational flow
       const previousQuestions = session.questions.map(q => q.question);
+      const previousAnswer = transcript || session.questions[currentIdx]?.transcript || '';
       const nextQuestion = await geminiService.decideNextQuestion(
         session.jobRole,
         session.skills || [],
         adjustedEvaluation, // Use adjusted evaluation based on confidence and body language
         session.askedCount,
         sessionIdStr,
-        previousQuestions
+        previousQuestions,
+        previousAnswer // Pass previous answer for conversational flow
       );
 
       session.questions.push({
@@ -220,7 +279,11 @@ router.post('/answer/:sessionId', verifyJWT, async (req, res) => {
     }
   } catch (error) {
     console.error('❌ Error processing answer:', error);
-    res.status(500).json({ error: 'Failed to process answer' });
+    // Return human-friendly error message
+    res.status(500).json({ 
+      error: 'Could you repeat that? I had trouble understanding.', 
+      needsRepetition: true 
+    });
   }
 });
 

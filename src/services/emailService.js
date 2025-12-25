@@ -92,7 +92,7 @@ class EmailService {
       throw error;
     }
   }
-  async sendVoiceInterviewFeedback(candidateEmail, candidateName, jobRole, score, status, strengths, weaknesses, improvementTips) {
+  async sendVoiceInterviewFeedback(candidateEmail, candidateName, jobRole, score, status, strengths, weaknesses, improvementTips, resources = [], courses = []) {
     try {
       if (!this.transporter) {
         console.warn('⚠️ Email transporter not initialized, skipping email');
@@ -156,6 +156,40 @@ class EmailService {
               </ul>
             </div>
             
+            <!-- Resources Section -->
+            ${resources.length > 0 ? `
+            <div style="background: #f0f9ff; padding: 25px; border-radius: 10px; margin: 25px 0; border-left: 5px solid #0284c7;">
+              <h3 style="color: #0369a1; margin-top: 0; margin-bottom: 15px; font-size: 20px; font-weight: bold;">📚 Recommended Learning Resources</h3>
+              <ul style="color: #374151; line-height: 2; margin: 0; padding-left: 20px; list-style: none;">
+                ${resources.map(r => `
+                  <li style="margin-bottom: 12px;">
+                    <a href="${r.url || '#'}" style="color: #0284c7; text-decoration: none; font-weight: 500;" target="_blank">
+                      ${r.title || 'Resource'}
+                    </a>
+                    ${r.type ? ` <span style="color: #64748b; font-size: 14px;">(${r.type})</span>` : ''}
+                  </li>
+                `).join('')}
+              </ul>
+            </div>
+            ` : ''}
+            
+            <!-- Courses Section -->
+            ${courses.length > 0 ? `
+            <div style="background: #fdf4ff; padding: 25px; border-radius: 10px; margin: 25px 0; border-left: 5px solid #9333ea;">
+              <h3 style="color: #7e22ce; margin-top: 0; margin-bottom: 15px; font-size: 20px; font-weight: bold;">🎓 Recommended Courses</h3>
+              <ul style="color: #374151; line-height: 2; margin: 0; padding-left: 20px; list-style: none;">
+                ${courses.map(c => `
+                  <li style="margin-bottom: 12px;">
+                    <a href="${c.url || '#'}" style="color: #9333ea; text-decoration: none; font-weight: 500;" target="_blank">
+                      ${c.title || 'Course'}
+                    </a>
+                    ${c.platform ? ` <span style="color: #64748b; font-size: 14px;">- ${c.platform}</span>` : ''}
+                  </li>
+                `).join('')}
+              </ul>
+            </div>
+            ` : ''}
+            
             <!-- Next Steps Section -->
             <div style="background: #f8fafc; padding: 25px; border-radius: 10px; border: 2px solid #e2e8f0; margin-top: 30px;">
               <p style="margin: 0 0 15px 0; color: #1e293b; font-weight: bold; font-size: 18px;">🎯 Recommended Next Steps</p>
@@ -164,6 +198,7 @@ class EmailService {
                 <li style="margin-bottom: 10px;"><strong>Focus on weak areas:</strong> Review the improvement suggestions above</li>
                 <li style="margin-bottom: 10px;"><strong>Research thoroughly:</strong> Learn more about ${jobRole} roles and requirements</li>
                 <li style="margin-bottom: 10px;"><strong>Prepare examples:</strong> Use the STAR method (Situation, Task, Action, Result)</li>
+                ${resources.length > 0 || courses.length > 0 ? '<li style="margin-bottom: 10px;"><strong>Explore resources:</strong> Check out the recommended resources and courses above to enhance your skills</li>' : ''}
               </ul>
             </div>
             

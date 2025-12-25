@@ -108,29 +108,17 @@ Return ONLY the question text. No quotes, no prefixes, no formatting. Just the q
     return question;
   }
 
-  async decideNextQuestion(jobRole, skills, evaluation, askedCount, sessionId, previousQuestions = []) {
+  async decideNextQuestion(jobRole, skills, evaluation, askedCount, sessionId, previousQuestions = [], previousAnswer = '') {
     try {
       if (!process.env.GEMINI_API_KEY) {
         throw new Error('GEMINI_API_KEY not configured');
       }
 
       const difficulty = evaluation === 'correct' ? 'harder' : evaluation === 'partial' ? 'medium' : 'easier';
-      const skillHint = Array.isArray(skills) && skills.length ? skills.slice(0, 3).join(', ') : 'role-related skills';
-      const randomSeed = Math.random().toString(36).substring(7);
       
       // Get previously asked questions for this session
       const askedInSession = this.askedQuestions.get(sessionId) || [];
       const allPrevious = [...askedInSession, ...previousQuestions];
-      
-      // Add more variation using timestamp and question count
-      const sessionVariation = Date.now().toString().slice(-6);
-      const questionCategories = [
-        'technical deep-dive', 'problem-solving', 'team collaboration', 
-        'real-world scenarios', 'technical concepts', 'project experience',
-        'industry trends', 'specific technologies', 'best practices'
-      ];
-      const categoryIndex = (askedCount + parseInt(sessionVariation.slice(-2))) % questionCategories.length;
-      const questionCategory = questionCategories[categoryIndex];
       
       // Ensure we reference actual skills, not generic terms
       const specificSkills = Array.isArray(skills) && skills.length 
@@ -140,35 +128,83 @@ Return ONLY the question text. No quotes, no prefixes, no formatting. Just the q
         ? specificSkills.join(', ')
         : `${jobRole}-related technical skills`;
 
-      const prompt = `You are a real human interviewer having a natural conversation. You've been listening to the candidate's answers and are genuinely curious to learn more.
+      // Build conversation context
+      const conversationHistory = allPrevious.length > 0 
+        ? allPrevious.slice(-3).map((q, i) => `Q${allPrevious.length - 3 + i + 1}: ${q}`).join('\n')
+        : '';
+
+      // Extract key topics/entities from previous answer for better connection
+      const previousAnswerSummary = previousAnswer 
+        ? `Key things they mentioned: ${previousAnswer.substring(0, 300)}`
+        : '';
+
+      const prompt = `You are a real human interviewer in a natural, flowing conversation. You're genuinely interested and your questions naturally build on what they just said. This feels like talking to a colleague, not reading questions from a list.
 
 Job Role: ${jobRole}
 Required Technical Skills: ${skillsText}
-Question Category: ${questionCategory}
-Difficulty Level: ${difficulty} (based on their previous answer which was ${evaluation})
+Difficulty Level: ${difficulty} (based on their previous answer quality: ${evaluation})
 Question Number: ${askedCount + 1} of ~6
-Session Variation: ${sessionVariation}
 
-QUESTIONS ALREADY ASKED (you MUST ask something completely different):
-${allPrevious.map((q, i) => `${i + 1}. ${q}`).join('\n')}
+${previousAnswer ? `WHAT THE CANDIDATE JUST SAID:
+"${previousAnswer.substring(0, 600)}${previousAnswer.length > 600 ? '...' : ''}"
+${previousAnswerSummary}
 
-Generate ONE natural, conversational question that:
-- Is COMPLETELY DIFFERENT from all questions above (different topic, different angle)
-- Sounds like a real person asking, not a script (vary your phrasing, be natural)
-- Is specifically relevant to ${jobRole} and ${skillsText} skills (not generic)
-- Matches ${difficulty} difficulty (${difficulty === 'easier' ? 'more straightforward and welcoming' : difficulty === 'harder' ? 'more challenging, deeper technical' : 'moderate depth'})
-- Focuses on: ${questionCategory}
-- Shows genuine interest - like you're really listening and curious
-- Uses natural, varied language (avoid interview script clichés)
+CRITICAL: Your next question MUST flow naturally from their answer. It should feel like you're genuinely curious about something specific they mentioned.
 
-Write it as you would naturally ask it in a real conversation. Be specific to the role and skills. Vary your phrasing from typical interview templates.
+EFFECTIVE CONVERSATION FLOW EXAMPLES:
+- If they mentioned "React" → "I see. You mentioned using React - how did you approach state management when the app grew larger?"
+- If they said "worked on a project" → "That sounds interesting. Can you walk me through how you structured that project from the start?"
+- If they mentioned "faced challenges" → "Right. You mentioned some challenges - what was your approach to solving those?"
+- If they talked about "team collaboration" → "Got it. How did you handle communication when working with that team?"
 
-Return ONLY the question text. No quotes, no prefixes, no formatting. Just the natural question.`;
+Your question should feel like a natural follow-up - like you're genuinely interested in what they said.` : ''}
 
-      console.log(`🎯 [${sessionId}] Generating ${difficulty} question #${askedCount + 1}...`);
+${conversationHistory ? `CONVERSATION SO FAR:
+${conversationHistory}
+
+Remember: Keep building on what was discussed. Each question should grow from the last answer.` : ''}
+
+CONVERSATION RULES:
+1. ALWAYS start with a brief acknowledgment (1-3 words): "I see", "That's interesting", "Hmm, okay", "Right", "Got it", "Interesting"
+2. Your question MUST directly reference something they just mentioned - a specific technology, project, challenge, approach, etc.
+3. Make it feel natural - like you're genuinely curious about what they said
+4. Use conversational, friendly language - not formal interview script language
+5. Keep the thread going - build on their answer, don't jump to a new topic
+
+Generate as TWO parts separated by "|||":
+Part 1: Brief acknowledgment (like "I see", "That's interesting", "Right", "Got it")
+Part 2: Your next question that DIRECTLY references something specific from their last answer
+
+Example format: "That's interesting ||| You mentioned using React there - how do you typically handle state management in larger applications?"
+
+Return ONLY the text in format: "[acknowledgment] ||| [connected question]"`;
+
+      console.log(`🎯 [${sessionId}] Generating conversational ${difficulty} question #${askedCount + 1}...`);
       const result = await this.model.generateContent(prompt);
       const response = await result.response;
-      const question = this.cleanQuestion(response.text());
+      let fullResponse = this.cleanQuestion(response.text());
+      
+      // Parse acknowledgment and question
+      let acknowledgment = '';
+      let question = fullResponse;
+      
+      if (fullResponse.includes('|||')) {
+        const parts = fullResponse.split('|||').map(p => p.trim());
+        acknowledgment = parts[0] || '';
+        question = parts[1] || parts[0] || fullResponse;
+      }
+      
+      // Add natural fillers more organically if no acknowledgment was generated
+      if (!acknowledgment && askedCount > 0 && Math.random() < 0.4) {
+        const fillers = ['Hmm, ', 'Okay, ', 'Alright, ', 'I see, ', 'Got it, '];
+        const filler = fillers[Math.floor(Math.random() * fillers.length)];
+        acknowledgment = filler.trim();
+      }
+      
+      // Combine acknowledgment + question
+      if (acknowledgment && question) {
+        question = `${acknowledgment} ${question.charAt(0).toLowerCase() + question.slice(1)}`;
+      }
       
       // Track this question
       if (!this.askedQuestions.has(sessionId)) {
@@ -176,25 +212,17 @@ Return ONLY the question text. No quotes, no prefixes, no formatting. Just the n
       }
       this.askedQuestions.get(sessionId).push(question);
       
-      // Occasionally add natural fillers (1 in 3 questions max, randomly)
-      const shouldAddFiller = askedCount > 1 && (askedCount % 3 === 0 || Math.random() < 0.15);
-      if (shouldAddFiller) {
-        const fillers = ['Alright, ', 'Okay, ', 'Got it, '];
-        const filler = fillers[Math.floor(Math.random() * fillers.length)];
-        question = filler + question.charAt(0).toLowerCase() + question.slice(1);
-      }
-      
-      console.log(`✅ [${sessionId}] Generated: "${question.substring(0, 60)}..."`);
+      console.log(`✅ [${sessionId}] Generated conversational question: "${question.substring(0, 80)}..."`);
       return { question, difficulty };
     } catch (error) {
       console.error(`❌ [${sessionId}] Error generating next question:`, error.message);
       console.log(`⚠️ [${sessionId}] Using fallback question generation`);
       // Generate intelligent fallback question
-      return this.generateFallbackNextQuestion(jobRole, skills, evaluation, askedCount, sessionId, previousQuestions);
+      return this.generateFallbackNextQuestion(jobRole, skills, evaluation, askedCount, sessionId, previousQuestions, previousAnswer);
     }
   }
 
-  generateFallbackNextQuestion(jobRole, skills, evaluation, askedCount, sessionId, previousQuestions = []) {
+  generateFallbackNextQuestion(jobRole, skills, evaluation, askedCount, sessionId, previousQuestions = [], previousAnswer = '') {
     // Use actual skills from the job
     const specificSkills = Array.isArray(skills) && skills.length 
       ? skills.filter(s => s && s.trim().length > 0).slice(0, 2)
@@ -254,6 +282,13 @@ Return ONLY the question text. No quotes, no prefixes, no formatting. Just the n
       question = question.replace(/\?$/, variations[variationIndex]);
     }
     
+    // Add conversational filler if appropriate (not on first question, sometimes)
+    if (askedCount > 0 && Math.random() < 0.4) {
+      const fillers = ['Hmm, ', 'Okay, ', 'Alright, ', 'I see, ', 'Got it, '];
+      const filler = fillers[Math.floor(Math.random() * fillers.length)];
+      question = `${filler}${question.charAt(0).toLowerCase() + question.slice(1)}`;
+    }
+    
     console.log(`✅ [${sessionId}] Fallback ${difficulty} question: "${question.substring(0, 60)}..."`);
     return { question, difficulty: difficulty === 'harder' ? 'hard' : difficulty };
   }
@@ -264,10 +299,25 @@ Return ONLY the question text. No quotes, no prefixes, no formatting. Just the n
         throw new Error('GEMINI_API_KEY not configured');
       }
 
+      const lowerAnswer = answer.toLowerCase().trim();
+      
+      // Handle "I don't know" responses with hints and reassurance
+      const dontKnowPhrases = /\b(i\s+don'?t\s+know|i'm\s+not\s+sure|i\s+have\s+no\s+idea|not\s+really|not\s+sure|unclear|unsure)\b/gi;
+      if (dontKnowPhrases.test(answer) && answer.trim().length < 50) {
+        console.log(`💡 [${sessionId}] Candidate said they don't know - will provide hint`);
+        return { 
+          evaluation: 'partial', 
+          penalty: 8, 
+          confidenceLevel: 'low',
+          needsHint: true,
+          hint: `That's okay! Here's a hint: Think about ${question.substring(0, 100)}. What aspects of this have you encountered before?`
+        };
+      }
+
       // Quick checks
       if (!answer || answer.trim().length < 5) {
         console.log(`⚠️ [${sessionId}] Very short answer, marking as incorrect`);
-        return { evaluation: 'incorrect', penalty: 15, confidenceLevel: 'low' };
+        return { evaluation: 'incorrect', penalty: 15, confidenceLevel: 'low', needsRepetition: true };
       }
 
       if (answer.trim().length < 20) {
@@ -304,6 +354,10 @@ Penalty guidelines:
 - 13-16: Poor answer
 - 17-20: Very poor or irrelevant answer
 
+Special handling:
+- If candidate seems unsure or says "I don't know", treat as "partial" (penalty 8-10)
+- Be understanding and encouraging
+
 Return ONLY valid JSON, no other text.`;
 
       console.log(`🔍 [${sessionId}] Evaluating answer...`);
@@ -321,6 +375,24 @@ Return ONLY valid JSON, no other text.`;
         if (evaluation === 'correct' || evaluation === 'partial' || evaluation === 'incorrect') {
           // Detect confidence/hesitation if not already detected
           const detectedConfidence = confidenceLevel || this.detectConfidenceLevel(answer);
+          
+          // Check again for "I don't know" patterns
+          const lowerAnswer = answer.toLowerCase().trim();
+          const dontKnowPhrases = /\b(i\s+don'?t\s+know|i'm\s+not\s+sure|i\s+have\s+no\s+idea|not\s+really|not\s+sure|unclear|unsure)\b/gi;
+          const isDontKnow = dontKnowPhrases.test(answer) && answer.trim().length < 100;
+          
+          if (isDontKnow) {
+            console.log(`💡 [${sessionId}] Candidate expressed uncertainty - providing reassurance`);
+            return { 
+              evaluation: 'partial', 
+              penalty: 8, 
+              reason: parsed.reason, 
+              confidenceLevel: 'low',
+              needsHint: true,
+              hint: `That's completely okay! Let me give you a hint. Think about ${question.substring(0, 150)}. What comes to mind, even if it's just a small part?`
+            };
+          }
+          
           console.log(`✅ [${sessionId}] Evaluation: ${evaluation}, Penalty: ${penalty}, Confidence: ${detectedConfidence}`);
           return { evaluation, penalty, reason: parsed.reason, confidenceLevel: detectedConfidence };
         }
@@ -394,6 +466,8 @@ Analyze this interview and provide comprehensive feedback in JSON format:
   "strengths": [<array of 4-6 SPECIFIC, concrete strengths - reference specific things they said or demonstrated>],
   "weaknesses": [<array of 4-6 SPECIFIC areas needing improvement - reference what they actually said or didn't say>],
   "recommendations": [<array of 5-7 ACTIONABLE, specific improvement tips based on their actual performance>],
+  "resources": [<array of 3-5 learning resources with format: {"title": "Resource Name", "url": "https://example.com", "type": "article|course|video|documentation"}>],
+  "courses": [<array of 3-5 recommended courses with format: {"title": "Course Name", "platform": "Coursera|Udemy|freeCodeCamp|YouTube|Other", "url": "https://example.com"}>],
   "summary": "<2-3 sentence overall assessment that references specific aspects of their interview performance>"
 }
 
@@ -406,6 +480,8 @@ FEEDBACK QUALITY REQUIREMENTS:
 - Strengths: Be SPECIFIC and reference actual answers (e.g., "You demonstrated strong problem-solving when you explained [specific thing they mentioned]" not "Good problem-solving")
 - Weaknesses: Be SPECIFIC based on what they said or didn't say (e.g., "When asked about [topic], your answer lacked concrete examples like specific projects or technologies" not "Need more examples")
 - Recommendations: Be ACTIONABLE and tailored to their actual performance (e.g., "Based on your answer about [topic], practice using the STAR method" not "Use STAR method")
+- Resources: Provide 3-5 helpful learning resources (articles, documentation, videos) relevant to ${jobRole} and areas needing improvement. Include real URLs when possible (can use common platforms like MDN, React docs, etc.)
+- Courses: Provide 3-5 recommended online courses from platforms like Coursera, Udemy, freeCodeCamp, YouTube, etc. relevant to ${jobRole} and skill gaps. Include course titles and platform names.
 - Summary: Reference specific aspects of their interview performance, be honest but encouraging
 ${bodyLanguageData.length > 0 ? `\nOPTIONAL BODY LANGUAGE FEEDBACK (if relevant, use VERY gentle language):
 - You MAY gently mention body language tips IF patterns were observed
@@ -442,6 +518,8 @@ Return ONLY valid JSON, no other text.`;
           strengths: Array.isArray(analysis.strengths) ? analysis.strengths : [],
           improvements: Array.isArray(analysis.weaknesses) ? analysis.weaknesses : [],
           recommendations: Array.isArray(analysis.recommendations) ? analysis.recommendations : [],
+          resources: Array.isArray(analysis.resources) ? analysis.resources : [],
+          courses: Array.isArray(analysis.courses) ? analysis.courses : [],
           summary: analysis.summary || 'Good effort overall.'
         };
       }
@@ -588,11 +666,26 @@ Return ONLY valid JSON, no other text.`;
       avgAnswerLength < 30 ? 'Practice giving longer, more detailed responses' : 'Continue practicing to maintain detail while improving precision'
     ];
     
+      // Generate default resources and courses based on job role
+      const defaultResources = [
+        { title: `${jobRole} Interview Guide`, url: 'https://www.interviewbit.com/blog/interview-questions', type: 'article' },
+        { title: 'STAR Method for Behavioral Interviews', url: 'https://www.indeed.com/career-advice/interviewing/how-to-use-the-star-interview-response-technique', type: 'article' },
+        { title: 'Technical Interview Preparation', url: 'https://www.hackerrank.com/interview', type: 'article' }
+      ];
+      
+      const defaultCourses = [
+        { title: `${jobRole} Masterclass`, platform: 'Udemy', url: 'https://www.udemy.com' },
+        { title: 'Interview Skills Course', platform: 'Coursera', url: 'https://www.coursera.org' },
+        { title: 'Technical Interview Prep', platform: 'freeCodeCamp', url: 'https://www.freecodecamp.org' }
+      ];
+
       return {
       overallScore: finalScore,
       strengths: strengths.slice(0, 6),
       improvements: improvements.slice(0, 6),
       recommendations,
+      resources: defaultResources,
+      courses: defaultCourses,
       summary: finalScore >= 75 
         ? `You performed well with a score of ${finalScore}/100. Your answers demonstrated ${avgAnswerLength > 30 ? 'good depth and detail' : 'adequate detail'}. ${structuredAnswers >= questions.length * 0.5 ? 'You organized your thoughts well' : 'Focus on better structure'}, and ${hasTechnicalTerms ? 'you showed technical knowledge relevant to ' + jobRole : 'incorporate more technical depth'}. Continue practicing to refine your responses further.`
         : finalScore >= 60

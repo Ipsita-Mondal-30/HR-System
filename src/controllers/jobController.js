@@ -31,34 +31,80 @@ const createJob = async (req, res) => {
       rating
     } = req.body;
 
-    if (!title || !department || !role || !description) {
-      console.error("❌ Missing required fields", req.body);
-      return res.status(400).json({ error: "Title, department, role, and description are required" });
+    // Validate required fields - treat empty strings as missing
+    if (!title || !title.trim()) {
+      console.error("❌ Missing required field: title", { title });
+      return res.status(400).json({ error: "Title is required" });
     }
 
+    if (!description || !description.trim()) {
+      console.error("❌ Missing required field: description", { description: description ? 'provided' : 'missing' });
+      return res.status(400).json({ error: "Description is required" });
+    }
+
+    // Department and role are optional (can be null/undefined, but not empty strings)
+    const departmentId = department && department.trim() ? department : null;
+    const roleId = role && role.trim() ? role : null;
+
     const job = await Job.create({
-      title,
-      department,
-      role,
-      description,
-      companyName,
+      title: title.trim(),
+      department: departmentId,
+      role: roleId,
+      description: description.trim(),
+      companyName: companyName?.trim() || req.user.company || 'Company',
       companyLogo,
       companySize,
-      location,
-      remote,
+      location: location?.trim(),
+      remote: remote || false,
       employmentType,
-      experienceRequired,
-      minSalary,
-      maxSalary,
-      skills,
-      tags,
+      experienceRequired: experienceRequired ? Number(experienceRequired) : undefined,
+      minSalary: minSalary ? Number(minSalary) : undefined,
+      maxSalary: maxSalary ? Number(maxSalary) : undefined,
+      skills: Array.isArray(skills) ? skills : (skills ? skills.split(',').map(s => s.trim()).filter(Boolean) : []),
+      tags: Array.isArray(tags) ? tags : (tags ? tags.split(',').map(t => t.trim()).filter(Boolean) : []),
       rating,
       createdBy: req.user._id,
-      status: 'pending', // Jobs need admin approval before becoming active
-      isApproved: false, // Require admin approval for all jobs
+      status: 'active', // HR-created jobs are active by default
+      isApproved: true, // HR jobs are auto-approved
     });
 
-    console.log("✅ Job Created:", job._id);
+    // Verify the job was created with correct status
+    const verifiedJob = await Job.findById(job._id);
+    console.log("✅ Job Created and Verified:", {
+      id: verifiedJob._id,
+      title: verifiedJob.title,
+      status: verifiedJob.status,
+      isApproved: verifiedJob.isApproved,
+      companyName: verifiedJob.companyName
+    });
+
+    // Create notifications for all candidates about the new job
+    try {
+      const User = require('../models/User');
+      const notificationService = require('../services/notificationService');
+      
+      // Find all candidates with email notifications enabled
+      const candidates = await User.find({ 
+        role: 'candidate',
+        emailNotifications: { $ne: false } // Include true or undefined
+      }).select('_id');
+
+      // Create notifications in background (don't wait)
+      candidates.forEach(async (candidate) => {
+        await notificationService.notifyNewJobPosted(
+          candidate._id,
+          job._id,
+          job.title,
+          job.companyName || 'Company'
+        );
+      });
+
+      console.log(`📢 Created job notifications for ${candidates.length} candidates`);
+    } catch (notifError) {
+      console.error('Failed to create job notifications:', notifError);
+      // Don't fail job creation if notifications fail
+    }
+
     res.status(201).json(job);
   } catch (err) {
     console.error("🔥 Job creation failed:", err.message, err);
@@ -79,28 +125,29 @@ const getJobs = async (req, res) => {
       experience,
       minSalary,
       remote,
-      status = 'open'
+      status
     } = req.query;
 
-    // Build filter object - only show approved jobs to candidates
-    let filter = {};
+    // Build filter object - show approved jobs to candidates
+    // Show active/open jobs by default, but also include closed jobs if they're approved
+    let filter = {
+      status: { $in: ['active', 'open', 'closed'] },
+      isApproved: true
+    };
     
-    // For public view, only show approved jobs with active status
+    // If status is explicitly provided, use it
     if (status) {
-      if (status === 'open') {
-        // Map 'open' to 'active' for compatibility, but only approved jobs
+      if (status === 'open' || status === 'active') {
+        // Show active/open jobs
         filter.status = { $in: ['active', 'open'] };
-        filter.isApproved = true;
       } else {
+        // Show specific status
         filter.status = status;
-        // For any specific status, still only show approved jobs
-        filter.isApproved = true;
       }
-    } else {
-      // Default: show only approved active jobs
-      filter.status = { $in: ['active', 'open'] };
       filter.isApproved = true;
     }
+
+    console.log('🔍 getJobs filter:', JSON.stringify(filter, null, 2));
 
     // Keyword search (title, description, skills, tags)
     if (keyword) {
@@ -157,12 +204,34 @@ const getJobs = async (req, res) => {
       .populate('createdBy', 'name email')
       .sort({ createdAt: -1 });
 
+    console.log(`📊 Found ${jobs.length} jobs matching filter`);
+
+    // Convert Mongoose documents to plain objects for JSON response
+    const jobsArray = jobs.map(job => job.toObject ? job.toObject() : job);
+
     // If role filter is specified, filter by populated role title
-    let filteredJobs = jobs;
+    let filteredJobs = jobsArray;
     if (role) {
-      filteredJobs = jobs.filter(job => 
-        job.role && job.role.title.toLowerCase().includes(role.toLowerCase())
+      filteredJobs = jobsArray.filter(job => 
+        job.role && job.role.title && job.role.title.toLowerCase().includes(role.toLowerCase())
       );
+      console.log(`📊 Filtered to ${filteredJobs.length} jobs matching role: ${role}`);
+    }
+
+    // Log sample job for debugging
+    if (filteredJobs.length > 0) {
+      console.log('📋 Sample job:', {
+        id: filteredJobs[0]._id,
+        title: filteredJobs[0].title,
+        status: filteredJobs[0].status,
+        isApproved: filteredJobs[0].isApproved,
+        companyName: filteredJobs[0].companyName
+      });
+    } else {
+      console.log('⚠️ No jobs found with filter:', JSON.stringify(filter, null, 2));
+      // Debug: Check what jobs exist
+      const allJobs = await Job.find({}).select('title status isApproved').limit(5).lean();
+      console.log('📋 Sample of all jobs in DB:', allJobs);
     }
 
     res.json(filteredJobs);

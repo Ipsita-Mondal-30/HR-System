@@ -9,6 +9,12 @@ const transporter = nodemailer.createTransport({
 });
 
 const sendEmail = async ({ to, subject, html }) => {
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
+    console.warn('⚠️ Email credentials not configured. Email not sent to:', to);
+    console.warn('   Set EMAIL_USER and EMAIL_PASSWORD environment variables');
+    return null;
+  }
+
   const mailOptions = {
     from: `"HR Bot 🤖" <${process.env.EMAIL_USER}>`,
     to,
@@ -16,7 +22,14 @@ const sendEmail = async ({ to, subject, html }) => {
     html,
   };
 
-  return transporter.sendMail(mailOptions);
+  try {
+    const info = await transporter.sendMail(mailOptions);
+    console.log(`✅ Email sent successfully to: ${to}`, info.messageId);
+    return info;
+  } catch (error) {
+    console.error(`❌ Failed to send email to ${to}:`, error.message);
+    throw error;
+  }
 };
 
 module.exports = { sendEmail };
