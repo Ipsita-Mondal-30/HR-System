@@ -4,6 +4,7 @@ const { verifyJWT, isHR, isAdmin } = require('../middleware/auth');
 const Project = require('../models/Project');
 const Milestone = require('../models/Milestone');
 const Employee = require('../models/Employee');
+const { ensureProjectCompletionSynced } = require('../services/projectPerformanceService');
 
 // Get all projects
 router.get('/', verifyJWT, async (req, res) => {
@@ -15,12 +16,22 @@ router.get('/', verifyJWT, async (req, res) => {
     if (department) query.department = department;
     
     const projects = await Project.find(query)
-      .populate('projectManager', 'user position')
-      .populate('teamMembers.employee', 'user position')
+      .populate({
+        path: 'projectManager',
+        select: 'position',
+        populate: { path: 'user', select: 'name email' },
+      })
+      .populate({
+        path: 'teamMembers.employee',
+        select: 'position',
+        populate: { path: 'user', select: 'name email' },
+      })
       .populate('department', 'name')
       .sort({ createdAt: -1 })
       .limit(limit * 1)
       .skip((page - 1) * limit);
+
+    await Promise.all(projects.map((p) => ensureProjectCompletionSynced(p)));
     
     const total = await Project.countDocuments(query);
     
@@ -67,13 +78,23 @@ router.post('/', verifyJWT, async (req, res) => {
 router.get('/:id', verifyJWT, async (req, res) => {
   try {
     const project = await Project.findById(req.params.id)
-      .populate('projectManager', 'user position')
-      .populate('teamMembers.employee', 'user position')
+      .populate({
+        path: 'projectManager',
+        select: 'position',
+        populate: { path: 'user', select: 'name email' },
+      })
+      .populate({
+        path: 'teamMembers.employee',
+        select: 'position',
+        populate: { path: 'user', select: 'name email' },
+      })
       .populate('department', 'name');
     
     if (!project) {
       return res.status(404).json({ error: 'Project not found' });
     }
+
+    await ensureProjectCompletionSynced(project);
     
     // Get milestones
     const milestones = await Milestone.find({ project: project._id })
@@ -114,14 +135,27 @@ router.put('/:id', verifyJWT, async (req, res) => {
       { $set: updates },
       { new: true, runValidators: true }
     )
-      .populate('projectManager', 'user position')
-      .populate('teamMembers.employee', 'user position')
+      .populate({
+        path: 'projectManager',
+        select: 'position',
+        populate: { path: 'user', select: 'name email' },
+      })
+      .populate({
+        path: 'teamMembers.employee',
+        select: 'position',
+        populate: { path: 'user', select: 'name email' },
+      })
       .populate('department', 'name');
     
     if (!project) {
       return res.status(404).json({ error: 'Project not found' });
     }
-    
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`project:${project._id}`).emit('project:updated', project);
+    }
+
     res.json(project);
   } catch (error) {
     console.error('Error updating project:', error);

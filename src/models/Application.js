@@ -11,9 +11,17 @@ const applicationSchema = new mongoose.Schema({
   matchInsights: {
     matchScore: Number,
     explanation: String,
+    summary: String,
     matchingSkills: [String],
     missingSkills: [String],
     tags: [String],
+    strengths: [String],
+    improvements: [String],
+    actionPlan: [String],
+    resumeTips: [String],
+    interviewTips: [String],
+    analyzedAt: Date,
+    source: String,
   },
   candidate: {
     type: mongoose.Schema.Types.ObjectId,

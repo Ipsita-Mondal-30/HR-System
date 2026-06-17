@@ -103,12 +103,25 @@ async function notifyInterviewCompleted(userId, interviewId, jobTitle) {
   );
 }
 
+async function notifyPerformanceReview(userId, feedbackId, reviewTitle, reviewerName) {
+  return createNotification(
+    userId,
+    'performance_review',
+    'Performance Review Submitted',
+    `${reviewerName} has submitted your ${reviewTitle}. View it in your performance dashboard.`,
+    { type: 'feedback', id: feedbackId },
+    `/employee/performance`
+  );
+}
+
 module.exports = {
   createNotification,
   notifyJobApplied,
   notifyInterviewScheduled,
   notifyApplicationStatusChanged,
   notifyNewJobPosted,
-  notifyInterviewCompleted
+  notifyInterviewCompleted,
+  notifyPerformanceReview
 };
+
 

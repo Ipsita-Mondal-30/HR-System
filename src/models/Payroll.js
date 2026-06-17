@@ -159,25 +159,23 @@ payrollSchema.index({ status: 1 });
 payrollSchema.index({ month: 1, year: 1 });
 payrollSchema.index({ createdAt: -1 });
 
-// Pre-save middleware to calculate gross and net salary
-payrollSchema.pre('save', function(next) {
-  // Calculate total allowances
-  const totalAllowances = Object.values(this.allowances).reduce((sum, val) => sum + (val || 0), 0);
-  
-  // Calculate total deductions
-  const totalDeductions = Object.values(this.deductions).reduce((sum, val) => sum + (val || 0), 0);
-  
-  // Calculate overtime amount if not set
-  if (this.overtime.hours > 0 && this.overtime.rate > 0 && !this.overtime.amount) {
+// Pre-validate middleware to calculate gross and net salary before validation
+payrollSchema.pre('validate', function(next) {
+  if (this.status === 'draft') {
+    this.status = 'pending';
+  }
+
+  const totalAllowances = Object.values(this.allowances || {}).reduce((sum, val) => sum + (val || 0), 0);
+  const totalDeductions = Object.values(this.deductions || {}).reduce((sum, val) => sum + (val || 0), 0);
+
+  if (this.overtime?.hours > 0 && this.overtime?.rate > 0) {
     this.overtime.amount = this.overtime.hours * this.overtime.rate;
   }
-  
-  // Calculate gross salary
-  this.grossSalary = this.baseSalary + totalAllowances + (this.overtime.amount || 0) + (this.bonus || 0);
-  
-  // Calculate net salary
+
+  const overtimeAmount = this.overtime?.amount || 0;
+  this.grossSalary = (this.baseSalary || 0) + totalAllowances + overtimeAmount + (this.bonus || 0);
   this.netSalary = this.grossSalary - totalDeductions;
-  
+
   next();
 });
 

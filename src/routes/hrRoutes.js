@@ -3,6 +3,12 @@ const router = express.Router();
 const { verifyJWT, isHRorAdmin } = require('../middleware/auth');
 const { sendEmail } = require('../utils/email');
 const Application = require('../models/Application');
+const {
+  listSupportTickets,
+  respondSupportTicket,
+  listFeedbackRequests,
+  respondFeedbackRequest
+} = require('../controllers/supportController');
 const User = require('../models/User');
 const Job = require('../models/Job');
 const {
@@ -10,6 +16,7 @@ const {
   getPayrollById,
   createPayroll,
   updatePayroll,
+  updatePayrollNotes,
   approvePayroll,
   markAsPaid,
   getPayrollStats
@@ -348,15 +355,23 @@ router.get('/employees', verifyJWT, isHRorAdmin, getAllEmployees);
 router.get('/employees/:id', verifyJWT, isHRorAdmin, async (req, res) => {
   try {
     const Employee = require('../models/Employee');
+    const { syncEmployeePerformanceFromProjects } = require('../services/projectPerformanceService');
     const employee = await Employee.findById(req.params.id)
       .populate('user', 'name email')
-      .populate('department', 'name');
+      .populate('department', 'name')
+      .populate({ path: 'manager', select: 'position', populate: { path: 'user', select: 'name email' } });
     
     if (!employee) {
       return res.status(404).json({ error: 'Employee not found' });
     }
+
+    await syncEmployeePerformanceFromProjects(employee._id);
+    const refreshed = await Employee.findById(employee._id)
+      .populate('user', 'name email')
+      .populate('department', 'name')
+      .populate({ path: 'manager', select: 'position', populate: { path: 'user', select: 'name email' } });
     
-    res.json(employee);
+    res.json(refreshed);
   } catch (error) {
     console.error('Error fetching employee:', error);
     res.status(500).json({ error: 'Failed to fetch employee' });
@@ -395,12 +410,19 @@ router.get('/feedback', verifyJWT, isHRorAdmin, async (req, res) => {
 });
 
 // Payroll Management Routes for HR
+router.get('/payroll/stats', verifyJWT, isHRorAdmin, getPayrollStats);
 router.get('/payroll', verifyJWT, isHRorAdmin, getAllPayrolls);
 router.get('/payroll/:id', verifyJWT, isHRorAdmin, getPayrollById);
 router.post('/payroll', verifyJWT, isHRorAdmin, createPayroll);
-router.put('/payroll/:id', verifyJWT, isHRorAdmin, updatePayroll);
+router.put('/payroll/:id/notes', verifyJWT, isHRorAdmin, updatePayrollNotes);
 router.put('/payroll/:id/approve', verifyJWT, isHRorAdmin, approvePayroll);
 router.put('/payroll/:id/mark-paid', verifyJWT, isHRorAdmin, markAsPaid);
-router.get('/payroll/stats', verifyJWT, isHRorAdmin, getPayrollStats);
+router.put('/payroll/:id', verifyJWT, isHRorAdmin, updatePayroll);
+
+// HR & Admin — employee support & feedback requests
+router.get('/support/tickets', verifyJWT, isHRorAdmin, listSupportTickets);
+router.put('/support/tickets/:id/respond', verifyJWT, isHRorAdmin, respondSupportTicket);
+router.get('/support/feedback-requests', verifyJWT, isHRorAdmin, listFeedbackRequests);
+router.put('/support/feedback-requests/:id/respond', verifyJWT, isHRorAdmin, respondFeedbackRequest);
 
 module.exports = router;

@@ -5,10 +5,19 @@ const Employee = require('../models/Employee');
 const Department = require('../models/Department');
 const Project = require('../models/Project');
 const Milestone = require('../models/Milestone');
+const ProjectWorkSubmission = require('../models/ProjectWorkSubmission');
 const Feedback = require('../models/Feedback');
+const { syncEmployeeStatsFromSubmissions, buildEmployeePerformanceOverview, canSubmitWork, isActiveMilestone, ensureProjectCompletionSynced, syncEmployeePerformanceFromProjects } = require('../services/projectPerformanceService');
+const employeeResumeUpload = require('../middleware/employeeResumeUpload');
+const { createNotification } = require('../services/notificationService');
+const { checkAndNotifyMilestoneDeadlines } = require('../services/milestoneDeadlineService');
 const OKR = require('../models/OKR');
+const Achievement = require('../models/Achievement');
 const User = require('../models/User');
+const SupportTicket = require('../models/SupportTicket');
+const FeedbackRequest = require('../models/FeedbackRequest');
 const { CohereClient } = require('cohere-ai');
+const { downloadEmployeePayslip } = require('../controllers/payrollController');
 
 
 
@@ -32,9 +41,9 @@ router.get('/dashboard/stats', verifyJWT, async (req, res) => {
       status: 'active'
     });
 
-    // Get feedback count
-    const feedbackCount = await Feedback.countDocuments({
-      employee: employee._id
+    const achievementCount = await Achievement.countDocuments({
+      employee: employee._id,
+      isActive: true
     });
 
     const stats = {
@@ -43,7 +52,7 @@ router.get('/dashboard/stats', verifyJWT, async (req, res) => {
       completedTasks: 0, // Placeholder - implement task tracking if needed
       upcomingDeadlines: 0, // Placeholder - implement deadline tracking if needed
       performanceScore: employee.performanceScore || 0,
-      achievements: feedbackCount // Using feedback count as achievements for now
+      achievements: achievementCount
     };
 
     console.log('✅ Dashboard stats:', stats);
@@ -62,15 +71,21 @@ router.get('/me', verifyJWT, async (req, res) => {
     const employee = await Employee.findOne({ user: req.user._id })
       .populate('user', 'name email phone')
       .populate('department', 'name')
-      .populate('manager', 'user position');
+      .populate({ path: 'manager', select: 'position', populate: { path: 'user', select: 'name email' } });
 
     if (!employee) {
       console.log('❌ Employee not found for user:', req.user._id);
       return res.status(404).json({ error: 'Employee profile not found' });
     }
 
-    console.log('✅ Employee profile found:', employee.user.name);
-    res.json(employee);
+    await syncEmployeePerformanceFromProjects(employee._id);
+    const refreshed = await Employee.findById(employee._id)
+      .populate('user', 'name email phone')
+      .populate('department', 'name')
+      .populate({ path: 'manager', select: 'position', populate: { path: 'user', select: 'name email' } });
+
+    console.log('✅ Employee profile found:', refreshed.user.name);
+    res.json(refreshed);
   } catch (error) {
     console.error('❌ Error fetching current employee:', error);
     res.status(500).json({ error: 'Failed to fetch employee profile' });
@@ -89,7 +104,7 @@ router.get('/profile', verifyJWT, async (req, res) => {
     const employee = await Employee.findOne({ user: req.user._id })
       .populate('user', 'name email phone')
       .populate('department', 'name')
-      .populate('manager', 'user position');
+      .populate({ path: 'manager', select: 'position', populate: { path: 'user', select: 'name email' } });
 
     if (!employee) {
       console.log('❌ Employee not found for user:', req.user._id);
@@ -320,41 +335,39 @@ router.get('/me/payroll', verifyJWT, async (req, res) => {
     console.log(`🔍 Fetching payroll records for user: ${req.user._id}`);
     
     // Find employee with basic validation
-    const employee = await Employee.findOne({ 
-      user: req.user._id,
-      status: 'active'
-    });
+    const employee = await Employee.findOne({ user: req.user._id });
     
     if (!employee) {
-      console.error(`❌ Active employee profile not found for user: ${req.user._id}`);
+      console.error(`❌ Employee profile not found for user: ${req.user._id}`);
       return res.status(404).json({ 
-        message: 'Employee profile not found or inactive',
+        message: 'Employee profile not found',
         code: 'EMPLOYEE_NOT_FOUND'
       });
     }
 
     const Payroll = require('../models/Payroll');
+    const { year } = req.query;
     
-    // Get payroll records with proper population and error handling
+    const payrollFilter = { 
+      employee: employee._id,
+      status: { $in: ['approved', 'paid'] }
+    };
+    if (year) payrollFilter.year = parseInt(year);
+
     let payrolls = [];
     try {
-      payrolls = await Payroll.find({ 
-        employee: employee._id,
-        status: { $in: ['approved', 'paid'] } // Only show approved/paid records
-      })
+      payrolls = await Payroll.find(payrollFilter)
       .populate({
         path: 'employee',
         select: 'user position',
         populate: {
           path: 'user',
-          select: 'name email',
-          match: { isActive: true }
+          select: 'name email'
         }
       })
       .populate({
         path: 'approvedBy',
-        select: 'name email',
-        match: { isActive: true }
+        select: 'name email'
       })
       .sort({ year: -1, month: -1 })
       .lean();
@@ -388,6 +401,9 @@ router.get('/me/payroll', verifyJWT, async (req, res) => {
   }
 });
 
+// Download payslip PDF (must be before /me/payroll/:id)
+router.get('/me/payroll/:id/download', verifyJWT, downloadEmployeePayslip);
+
 // Get current user's specific payroll record
 router.get('/me/payroll/:id', verifyJWT, async (req, res) => {
   try {
@@ -402,15 +418,12 @@ router.get('/me/payroll/:id', verifyJWT, async (req, res) => {
     }
     
     // Find employee with basic validation
-    const employee = await Employee.findOne({ 
-      user: req.user._id,
-      status: 'active'
-    });
+    const employee = await Employee.findOne({ user: req.user._id });
     
     if (!employee) {
-      console.error(`❌ Active employee profile not found for user: ${req.user._id}`);
+      console.error(`❌ Employee profile not found for user: ${req.user._id}`);
       return res.status(404).json({ 
-        message: 'Employee profile not found or inactive',
+        message: 'Employee profile not found',
         code: 'EMPLOYEE_NOT_FOUND'
       });
     }
@@ -422,7 +435,7 @@ router.get('/me/payroll/:id', verifyJWT, async (req, res) => {
       const payroll = await Payroll.findOne({ 
         _id: req.params.id, 
         employee: employee._id,
-        status: { $in: ['approved', 'paid'] } // Only show approved/paid records
+        status: { $in: ['approved', 'paid'] }
       })
       .populate({
         path: 'employee',
@@ -430,20 +443,17 @@ router.get('/me/payroll/:id', verifyJWT, async (req, res) => {
         populate: [
           {
             path: 'user',
-            select: 'name email',
-            match: { isActive: true }
+            select: 'name email'
           },
           {
             path: 'department',
-            select: 'name',
-            match: { isActive: true }
+            select: 'name'
           }
         ]
       })
       .populate({
         path: 'approvedBy',
-        select: 'name email',
-        match: { isActive: true }
+        select: 'name email'
       })
       .lean();
 
@@ -524,6 +534,96 @@ router.get('/me/projects', verifyJWT, async (req, res) => {
   }
 });
 
+// Get current user's performance reviews and feedback
+router.get('/me/feedback', verifyJWT, async (req, res) => {
+  try {
+    const employee = await Employee.findOne({ user: req.user._id });
+    if (!employee) {
+      return res.status(404).json({ error: 'Employee profile not found' });
+    }
+
+    const { type } = req.query;
+    const query = {
+      employee: employee._id,
+      isVisible: true,
+      status: { $in: ['submitted', 'reviewed', 'acknowledged'] }
+    };
+    if (type) query.type = type;
+
+    const feedback = await Feedback.find(query)
+      .populate('reviewer', 'name email')
+      .populate('project', 'name')
+      .sort({ createdAt: -1 });
+
+    res.json({ feedback });
+  } catch (error) {
+    console.error('Error fetching employee feedback:', error);
+    res.status(500).json({ error: 'Failed to fetch feedback' });
+  }
+});
+
+// Update employee skills (self-service)
+router.put('/me/skills', verifyJWT, async (req, res) => {
+  try {
+    const { skills } = req.body;
+    const employee = await Employee.findOne({ user: req.user._id });
+    if (!employee) {
+      return res.status(404).json({ error: 'Employee profile not found' });
+    }
+    if (!Array.isArray(skills)) {
+      return res.status(400).json({ error: 'Skills must be an array' });
+    }
+    employee.skills = skills;
+    await employee.save();
+    res.json({ message: 'Skills updated', skills: employee.skills });
+  } catch (error) {
+    console.error('Error updating skills:', error);
+    res.status(500).json({ error: 'Failed to update skills' });
+  }
+});
+
+// Upload resume (file)
+router.post('/me/resume/upload', verifyJWT, employeeResumeUpload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'Resume file is required' });
+    }
+
+    const employee = await Employee.findOne({ user: req.user._id }).populate('user', 'name');
+    if (!employee) {
+      return res.status(404).json({ error: 'Employee profile not found' });
+    }
+
+    const fileUrl = req.file.path || req.file.secure_url || req.file.url;
+    employee.resume = {
+      fileName: req.file.originalname,
+      fileUrl,
+      uploadedAt: new Date(),
+      uploadedBy: req.user._id,
+    };
+    await employee.save();
+
+    const hrUsers = await User.find({ role: { $in: ['hr', 'admin'] }, isActive: true }).select('_id');
+    await Promise.all(
+      hrUsers.map((hr) =>
+        createNotification(
+          hr._id,
+          'resume_updated',
+          'Employee Resume Updated',
+          `${employee.user?.name || 'An employee'} uploaded a new resume: ${req.file.originalname}`,
+          { type: 'employee', id: employee._id },
+          `/admin/employees/${employee._id}`
+        )
+      )
+    );
+
+    res.json({ message: 'Resume uploaded successfully', resume: employee.resume });
+  } catch (error) {
+    console.error('Error uploading resume:', error);
+    res.status(500).json({ error: error.message || 'Failed to upload resume' });
+  }
+});
+
 // Update resume
 router.put('/me/resume', verifyJWT, async (req, res) => {
   try {
@@ -550,22 +650,59 @@ router.put('/me/resume', verifyJWT, async (req, res) => {
   }
 });
 
-// Request feedback
-router.post('/me/request-feedback', verifyJWT, async (req, res) => {
+// Request feedback — stored for HR/Admin review
+router.get('/me/feedback-requests', verifyJWT, async (req, res) => {
   try {
-    const { message, requestType } = req.body;
-    
     const employee = await Employee.findOne({ user: req.user._id });
     if (!employee) {
       return res.status(404).json({ error: 'Employee profile not found' });
     }
 
-    // Create a feedback request (you can create a FeedbackRequest model later)
-    // For now, just return success
-    res.json({ 
+    const requests = await FeedbackRequest.find({ employee: employee._id })
+      .populate('respondedBy', 'name email')
+      .sort({ createdAt: -1 });
+
+    res.json(requests);
+  } catch (error) {
+    console.error('Error fetching feedback requests:', error);
+    res.status(500).json({ error: 'Failed to fetch feedback requests' });
+  }
+});
+
+router.post('/me/request-feedback', verifyJWT, async (req, res) => {
+  try {
+    const { message, requestType } = req.body;
+    
+    const employee = await Employee.findOne({ user: req.user._id }).populate('user', 'name');
+    if (!employee) {
+      return res.status(404).json({ error: 'Employee profile not found' });
+    }
+
+    const feedbackRequest = await FeedbackRequest.create({
+      employee: employee._id,
+      requestType: requestType || 'General Feedback',
+      message: message?.trim() || ''
+    });
+
+    const hrUsers = await User.find({ role: { $in: ['hr', 'admin'] }, isActive: true }).select('_id');
+    await Promise.all(
+      hrUsers.map((hr) =>
+        createNotification(
+          hr._id,
+          'feedback_request',
+          'Feedback Requested',
+          `${employee.user?.name || 'Employee'} requested ${requestType || 'general'} feedback${message ? `: ${message}` : ''}`,
+          { type: 'employee', id: employee._id },
+          '/hr/support'
+        )
+      )
+    );
+
+    res.status(201).json({ 
       message: 'Feedback request submitted successfully',
       requestType,
-      submittedAt: new Date()
+      submittedAt: feedbackRequest.createdAt,
+      request: feedbackRequest
     });
   } catch (error) {
     console.error('Error requesting feedback:', error);
@@ -573,37 +710,170 @@ router.post('/me/request-feedback', verifyJWT, async (req, res) => {
   }
 });
 
-// Get employee's projects
+// Request training
+router.post('/me/request-training', verifyJWT, async (req, res) => {
+  try {
+    const { topic, message } = req.body;
+
+    const employee = await Employee.findOne({ user: req.user._id }).populate('user', 'name');
+    if (!employee) {
+      return res.status(404).json({ error: 'Employee profile not found' });
+    }
+
+    const hrUsers = await User.find({ role: { $in: ['hr', 'admin'] }, isActive: true }).select('_id');
+    await Promise.all(
+      hrUsers.map((hr) =>
+        createNotification(
+          hr._id,
+          'training_request',
+          'Training Requested',
+          `${employee.user?.name || 'Employee'} requested training${topic ? ` on ${topic}` : ''}${message ? `: ${message}` : ''}`,
+          { type: 'employee', id: employee._id },
+          `/admin/employees/${employee._id}`
+        )
+      )
+    );
+
+    res.json({
+      message: 'Training request submitted successfully',
+      topic,
+      submittedAt: new Date(),
+    });
+  } catch (error) {
+    console.error('Error requesting training:', error);
+    res.status(500).json({ error: 'Failed to request training' });
+  }
+});
+
+// Support tickets — employee help & HR support
+router.get('/me/support-tickets', verifyJWT, async (req, res) => {
+  try {
+    const employee = await Employee.findOne({ user: req.user._id });
+    if (!employee) {
+      return res.status(404).json({ error: 'Employee profile not found' });
+    }
+
+    const tickets = await SupportTicket.find({ employee: employee._id })
+      .populate('respondedBy', 'name email')
+      .sort({ createdAt: -1 });
+
+    res.json(tickets);
+  } catch (error) {
+    console.error('Error fetching support tickets:', error);
+    res.status(500).json({ error: 'Failed to fetch support tickets' });
+  }
+});
+
+router.post('/me/support-tickets', verifyJWT, async (req, res) => {
+  try {
+    const { subject, message, category, priority } = req.body;
+
+    if (!subject?.trim() || !message?.trim()) {
+      return res.status(400).json({ error: 'Subject and message are required' });
+    }
+
+    const employee = await Employee.findOne({ user: req.user._id }).populate('user', 'name');
+    if (!employee) {
+      return res.status(404).json({ error: 'Employee profile not found' });
+    }
+
+    const ticket = await SupportTicket.create({
+      employee: employee._id,
+      subject: subject.trim(),
+      message: message.trim(),
+      category: category || 'other',
+      priority: priority || 'medium'
+    });
+
+    const hrUsers = await User.find({ role: { $in: ['hr', 'admin'] }, isActive: true }).select('_id');
+    await Promise.all(
+      hrUsers.map((hr) =>
+        createNotification(
+          hr._id,
+          'support_request',
+          'New Support Request',
+          `${employee.user?.name || 'Employee'} submitted: ${subject.trim()}`,
+          { type: 'employee', id: employee._id },
+          '/hr/support'
+        )
+      )
+    );
+
+    res.status(201).json(ticket);
+  } catch (error) {
+    console.error('Error creating support ticket:', error);
+    res.status(500).json({ error: 'Failed to submit support request' });
+  }
+});
+
+// Get employee's projects (team member OR project manager)
 router.get('/:id/projects', verifyJWT, async (req, res) => {
   try {
+    checkAndNotifyMilestoneDeadlines().catch((err) =>
+      console.warn('Deadline check failed:', err.message)
+    );
+
     const projects = await Project.find({
-      'teamMembers.employee': req.params.id
+      $or: [
+        { 'teamMembers.employee': req.params.id },
+        { projectManager: req.params.id },
+      ],
     })
-      .populate('projectManager', 'user position')
+      .populate({
+        path: 'projectManager',
+        select: 'position',
+        populate: { path: 'user', select: 'name email' },
+      })
       .sort({ startDate: -1 });
-    
-    // Get milestones for each project
+
     const projectsWithMilestones = await Promise.all(
       projects.map(async (project) => {
-        const milestones = await Milestone.find({ 
+        await ensureProjectCompletionSynced(project);
+
+        const milestones = await Milestone.find({
           project: project._id,
-          assignedTo: req.params.id 
+          assignedTo: req.params.id,
         }).sort({ dueDate: 1 });
-        
+
+        const submissions = await ProjectWorkSubmission.find({
+          project: project._id,
+          employee: req.params.id,
+        }).sort({ createdAt: -1 });
+
+        const isPm = project.projectManager?.toString() === req.params.id;
         const teamMember = project.teamMembers.find(
-          member => member.employee.toString() === req.params.id
+          (member) => member.employee.toString() === req.params.id
         );
-        
+
+        await syncEmployeeStatsFromSubmissions(project._id, req.params.id);
+        const refreshed = await Project.findById(project._id);
+        const refreshedMember = refreshed?.teamMembers.find(
+          (member) => member.employee.toString() === req.params.id
+        );
+
+        const performanceOverview = await buildEmployeePerformanceOverview(
+          refreshed || project,
+          req.params.id,
+          milestones,
+          submissions
+        );
+
+        const activeMilestones = milestones.filter(isActiveMilestone);
+
         return {
           ...project.toObject(),
-          role: teamMember?.role || 'team-member',
-          contributionPercentage: teamMember?.contributionPercentage || 0,
-          hoursWorked: teamMember?.hoursWorked || 0,
-          milestones
+          role: isPm ? 'project-manager' : teamMember?.role || 'team-member',
+          isProjectManager: isPm,
+          contributionPercentage: performanceOverview.contributionPercentage,
+          hoursWorked: performanceOverview.hoursWorked,
+          performanceOverview,
+          canSubmitWork: canSubmitWork(refreshed || project, milestones),
+          activeMilestones,
+          milestones,
         };
       })
     );
-    
+
     res.json({ projects: projectsWithMilestones });
   } catch (error) {
     console.error('Error fetching employee projects:', error);
@@ -786,16 +1056,19 @@ router.get('/:id/profile', verifyJWT, async (req, res) => {
 router.get('/:id/performance', verifyJWT, async (req, res) => {
   try {
     const employee = await Employee.findById(req.params.id)
-      .populate('user', 'name email');
+      .populate('user', 'name email phone')
+      .populate('department', 'name')
+      .populate({ path: 'manager', select: 'user position', populate: { path: 'user', select: 'name' } });
     
     if (!employee) {
       return res.status(404).json({ error: 'Employee not found' });
     }
     
-    // Calculate performance metrics
     const projects = await Project.find({
       'teamMembers.employee': employee._id
     });
+
+    await Promise.all(projects.map((p) => ensureProjectCompletionSynced(p)));
     
     const completedProjects = projects.filter(p => p.status === 'completed');
     const onTimeProjects = completedProjects.filter(p => 
@@ -811,14 +1084,25 @@ router.get('/:id/performance', verifyJWT, async (req, res) => {
       m.completedDate && m.completedDate <= m.dueDate
     );
     
-    const feedback = await Feedback.find({
+    const feedbackRecords = await Feedback.find({
       employee: employee._id,
-      status: { $in: ['submitted', 'reviewed'] }
-    });
-    
-    const avgRating = feedback.length > 0 
-      ? feedback.reduce((sum, f) => sum + (f.overallRating || 0), 0) / feedback.length
+      status: { $in: ['submitted', 'reviewed', 'acknowledged'] }
+    })
+      .populate('reviewer', 'name email')
+      .sort({ createdAt: -1 });
+
+    const avgRating = feedbackRecords.length > 0 
+      ? feedbackRecords.reduce((sum, f) => sum + (f.overallRating || 0), 0) / feedbackRecords.length
       : 0;
+
+    const currentYear = new Date().getFullYear();
+    const okrs = await OKR.find({
+      employee: employee._id,
+      year: currentYear,
+      status: { $ne: 'cancelled' }
+    }).sort({ createdAt: -1 });
+
+    const completedOKRs = okrs.filter(o => o.status === 'completed' || o.overallProgress >= 100).length;
     
     const metrics = {
       projectsCompleted: completedProjects.length,
@@ -828,21 +1112,59 @@ router.get('/:id/performance', verifyJWT, async (req, res) => {
       milestonesOnTime: onTimeMilestones.length,
       milestoneSuccessRate: milestones.length > 0 ? (completedMilestones.length / milestones.length) * 100 : 0,
       averageFeedbackRating: avgRating,
-      totalFeedbackReceived: feedback.length
+      averageRating: avgRating,
+      totalFeedbackReceived: feedbackRecords.length,
+      feedbackCount: feedbackRecords.length,
+      performanceScore: employee.performanceScore || 0,
+      projectContribution: employee.projectContribution || 0,
+      okrsCount: okrs.length,
+      completedOKRs
     };
+
+    const recentFeedback = feedbackRecords.slice(0, 10).map((f) => ({
+      _id: f._id,
+      title: f.title,
+      type: f.type,
+      feedback: f.content,
+      rating: f.overallRating || 0,
+      createdAt: f.createdAt,
+      reviewPeriod: f.reviewPeriod,
+      status: f.status,
+      aiSummary: f.aiSummary,
+      ratings: f.ratings,
+      givenBy: { name: f.reviewer?.name || 'Unknown', email: f.reviewer?.email }
+    }));
     
     res.json({
       employee: {
-        id: employee._id,
-        name: employee.user.name,
+        _id: employee._id,
+        employeeId: employee.employeeId,
+        user: employee.user,
         position: employee.position,
-        performanceScore: employee.performanceScore
+        department: employee.department,
+        manager: employee.manager,
+        performanceScore: employee.performanceScore || 0,
+        hireDate: employee.hireDate,
+        joinDate: employee.hireDate,
+        employmentType: employee.employmentType,
+        status: employee.status
       },
       metrics,
+      recentFeedback,
+      okrs: okrs.map((o) => ({
+        _id: o._id,
+        objective: o.objective,
+        description: o.description,
+        period: o.period,
+        year: o.year,
+        overallProgress: o.overallProgress,
+        status: o.status,
+        keyResults: o.keyResults
+      })),
       recentActivity: {
         projects: projects.slice(0, 5),
         milestones: milestones.slice(0, 5),
-        feedback: feedback.slice(0, 3)
+        feedback: feedbackRecords.slice(0, 3)
       }
     });
   } catch (error) {

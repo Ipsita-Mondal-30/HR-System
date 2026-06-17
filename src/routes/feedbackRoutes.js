@@ -3,6 +3,8 @@ const router = express.Router();
 const { verifyJWT, isHR, isAdmin } = require('../middleware/auth');
 const Feedback = require('../models/Feedback');
 const Employee = require('../models/Employee');
+const User = require('../models/User');
+const { notifyPerformanceReview } = require('../services/notificationService');
 const { CohereClient } = require('cohere-ai');
 
 // Initialize Cohere client
@@ -60,6 +62,30 @@ async function processFeedbackWithAI(feedbackContent, ratings) {
   }
 }
 
+function normalizeFeedbackInput(body) {
+  const data = { ...body };
+
+  if (data.type === 'performance_review') {
+    data.type = 'performance-review';
+  }
+
+  if (!data.title) {
+    if (data.reviewPeriod) {
+      data.title = `Performance Review - ${data.reviewPeriod}`;
+    } else if (data.type === 'performance-review') {
+      data.title = `Performance Review - ${new Date().toLocaleDateString()}`;
+    } else {
+      data.title = 'Employee Feedback';
+    }
+  }
+
+  if (data.type === 'performance-review' && (!data.status || data.status === 'draft')) {
+    data.status = 'submitted';
+  }
+
+  return data;
+}
+
 // Get all feedback (HR/Admin view)
 router.get('/', verifyJWT, async (req, res) => {
   try {
@@ -96,13 +122,13 @@ router.get('/', verifyJWT, async (req, res) => {
 // Create new feedback
 router.post('/', verifyJWT, async (req, res) => {
   try {
-    const feedbackData = {
+    const feedbackData = normalizeFeedbackInput({
       ...req.body,
       reviewer: req.user._id
-    };
+    });
     
     // Validate employee exists
-    const employee = await Employee.findById(feedbackData.employee);
+    const employee = await Employee.findById(feedbackData.employee).populate('user', 'name email');
     if (!employee) {
       return res.status(400).json({ error: 'Employee not found' });
     }
@@ -126,10 +152,25 @@ router.post('/', verifyJWT, async (req, res) => {
     }
     
     await feedback.save();
+
+    if (feedback.type === 'performance-review' && feedback.overallRating) {
+      employee.performanceScore = Math.round((feedback.overallRating / 5) * 100);
+      await employee.save();
+    }
+
+    if (feedback.status === 'submitted' && employee.user) {
+      const reviewer = await User.findById(req.user._id).select('name');
+      await notifyPerformanceReview(
+        employee.user._id,
+        feedback._id,
+        feedback.title,
+        reviewer?.name || 'Your manager'
+      );
+    }
     
     await feedback.populate([
       { path: 'reviewer', select: 'name email' },
-      { path: 'employee', select: 'user position' },
+      { path: 'employee', select: 'user position', populate: { path: 'user', select: 'name email' } },
       { path: 'project', select: 'name' },
       { path: 'milestone', select: 'title' }
     ]);
@@ -137,6 +178,10 @@ router.post('/', verifyJWT, async (req, res) => {
     res.status(201).json(feedback);
   } catch (error) {
     console.error('Error creating feedback:', error);
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map((e) => e.message);
+      return res.status(400).json({ error: messages.join(', ') });
+    }
     res.status(500).json({ error: 'Failed to create feedback' });
   }
 });
@@ -316,7 +361,8 @@ router.post('/:id/respond', verifyJWT, async (req, res) => {
     }
     
     // Check if user is the employee receiving feedback
-    if (feedback.employee.user.toString() !== req.user._id.toString()) {
+    const employeeUserId = feedback.employee.user?._id || feedback.employee.user;
+    if (employeeUserId.toString() !== req.user._id.toString()) {
       return res.status(403).json({ error: 'Not authorized to respond to this feedback' });
     }
     

@@ -102,6 +102,79 @@ router.get('/resume', verifyJWT, async (req, res) => {
   }
 });
 
+function buildFinalResults(session, analysis, score, status, emailSent) {
+  return {
+    sessionId: session._id.toString(),
+    jobRole: session.jobRole,
+    prepScore: score,
+    status,
+    strengths: analysis.strengths || [],
+    weaknesses: analysis.improvements || [],
+    improvementTips: analysis.recommendations || [],
+    summary: analysis.summary || analysis.detailedFeedback || '',
+    resources: analysis.resources || [],
+    courses: analysis.courses || [],
+    questions: session.questions.map((q, i) => ({
+      number: i + 1,
+      question: q.question,
+      answer: q.transcript || q.answer || '',
+      evaluation: q.evaluation,
+    })),
+    completedAt: session.completedAt,
+    emailSent,
+  };
+}
+
+async function sendInterviewEmail(session, user, analysis, score, status) {
+  try {
+    const sent = await emailService.sendVoiceInterviewFeedback(
+      user.email,
+      user.name,
+      session.jobRole,
+      score,
+      status,
+      analysis.strengths || [],
+      analysis.improvements || [],
+      analysis.recommendations || [],
+      analysis.resources || [],
+      analysis.courses || []
+    );
+    if (sent) {
+      session.emailSent = true;
+      await session.save();
+    }
+    return !!sent;
+  } catch (emailError) {
+    console.error('❌ Email sending failed (interview still completed):', emailError.message);
+    return false;
+  }
+}
+
+function getSpokenFeedback(evalResult) {
+  if (evalResult.needsHint && evalResult.hint) {
+    return "That's okay — don't worry. Here's a quick tip to help you.";
+  }
+  const pools = {
+    correct: [
+      'Great answer! That was clear and well explained.',
+      'Excellent response! You addressed that really well.',
+      'Nice work — strong answer. Let\'s continue.',
+    ],
+    partial: [
+      'Good effort! You\'re on the right track. Here\'s the next question.',
+      'Thanks — solid start. Let\'s keep going.',
+      'Not bad at all. I\'ll ask you another question now.',
+    ],
+    incorrect: [
+      'Thanks for sharing. Let\'s try the next question.',
+      'I appreciate your honesty. Moving on to another question.',
+      'No worries — let\'s continue with the next one.',
+    ],
+  };
+  const pool = pools[evalResult.evaluation] || pools.partial;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
 // Process spoken answer and get next question
 router.post('/answer/:sessionId', verifyJWT, async (req, res) => {
   try {
@@ -180,33 +253,19 @@ router.post('/answer/:sessionId', verifyJWT, async (req, res) => {
         console.error('Failed to create interview completion notification:', notifError);
       }
 
-      // Send email
+      // Send email (non-blocking — report is always available in-app)
       const user = await User.findById(req.user._id);
-      await emailService.sendVoiceInterviewFeedback(
-        user.email,
-        user.name,
-        session.jobRole,
-        score,
-        status,
-        analysis.strengths || [],
-        analysis.improvements || [],
-        analysis.recommendations || [],
-        analysis.resources || [],
-        analysis.courses || []
-      );
+      const emailSent = await sendInterviewEmail(session, user, analysis, score, status);
 
-      console.log('✅ Interview completed and email sent');
+      console.log(`✅ Interview completed${emailSent ? ', email sent' : ', email failed — report available in app'}`);
 
       return res.json({
         endInterview: true,
-        closingMessage: 'Thank you for completing the interview. Your detailed feedback has been sent to your email.',
-        finalResults: {
-          prepScore: score,
-          status,
-          strengths: analysis.strengths || [],
-          weaknesses: analysis.improvements || [],
-          improvementTips: analysis.recommendations || []
-        }
+        closingMessage: emailSent
+          ? 'Thank you for completing the interview. Your full report is ready — you can download it below. A copy was also sent to your email.'
+          : 'Thank you for completing the interview. Your full report is ready — download it below.',
+        emailSent,
+        finalResults: buildFinalResults(session, analysis, score, status, emailSent),
       });
     } else {
       // Generate next question based on evaluation
@@ -240,11 +299,12 @@ router.post('/answer/:sessionId', verifyJWT, async (req, res) => {
       // Check if candidate said "I don't know" - provide hint
       const evalResultNeedsHint = evalResult.needsHint;
       if (evalResultNeedsHint && evalResult.hint) {
-        // Return hint as the next "question" so AI can reassure them
         return res.json({
           endInterview: false,
           nextQuestion: evalResult.hint,
-          isHint: true
+          feedbackMessage: getSpokenFeedback(evalResult),
+          evaluation: evalResult.evaluation,
+          isHint: true,
         });
       }
 
@@ -274,7 +334,9 @@ router.post('/answer/:sessionId', verifyJWT, async (req, res) => {
 
       return res.json({
         endInterview: false,
-        nextQuestion: nextQuestion.question
+        nextQuestion: nextQuestion.question,
+        feedbackMessage: getSpokenFeedback(evalResult),
+        evaluation: evalResult.evaluation,
       });
     }
   } catch (error) {
@@ -287,17 +349,113 @@ router.post('/answer/:sessionId', verifyJWT, async (req, res) => {
   }
 });
 
+// Get full report for a completed session (download / profile)
+router.get('/report/:sessionId', verifyJWT, async (req, res) => {
+  try {
+    const session = await VoiceInterview.findById(req.params.sessionId)
+      .populate('job', 'title companyName')
+      .populate('candidate', 'name email');
+
+    if (!session) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+
+    if (session.candidate._id.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    if (session.status !== 'completed' || !session.aiAnalysis) {
+      return res.status(400).json({ error: 'Interview report not available yet' });
+    }
+
+    const analysis = session.aiAnalysis;
+    const score = Math.max(0, Math.min(100, analysis.overallScore || 0));
+    const status = score >= 80 ? 'READY' : score >= 60 ? 'NEEDS PRACTICE' : 'NOT READY';
+
+    res.json({
+      report: buildFinalResults(session, analysis, score, status, session.emailSent),
+      candidateName: session.candidate.name,
+      jobTitle: session.job?.title,
+      companyName: session.job?.companyName,
+    });
+  } catch (error) {
+    console.error('Error fetching report:', error);
+    res.status(500).json({ error: 'Failed to fetch report' });
+  }
+});
+
+// Resend feedback email for a completed session
+router.post('/resend-email/:sessionId', verifyJWT, async (req, res) => {
+  try {
+    const session = await VoiceInterview.findById(req.params.sessionId);
+
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    if (session.candidate.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    if (session.status !== 'completed' || !session.aiAnalysis) {
+      return res.status(400).json({ error: 'Interview not completed' });
+    }
+
+    const user = await User.findById(req.user._id);
+    const analysis = session.aiAnalysis;
+    const score = Math.max(0, Math.min(100, analysis.overallScore || 0));
+    const status = score >= 80 ? 'READY' : score >= 60 ? 'NEEDS PRACTICE' : 'NOT READY';
+
+    const emailSent = await sendInterviewEmail(session, user, analysis, score, status);
+
+    res.json({
+      success: emailSent,
+      message: emailSent
+        ? `Report sent to ${user.email}`
+        : 'Could not send email. Please download your report instead.',
+    });
+  } catch (error) {
+    console.error('Error resending email:', error);
+    res.status(500).json({ error: 'Failed to resend email' });
+  }
+});
+
 // Get interview history
 router.get('/history', verifyJWT, async (req, res) => {
   try {
     const sessions = await VoiceInterview.find({ 
-      candidate: req.user._id 
+      candidate: req.user._id,
+      status: 'completed',
     })
     .populate('job', 'title companyName')
-    .sort({ createdAt: -1 })
-    .limit(20);
+    .sort({ completedAt: -1 })
+    .limit(20)
+    .select('jobRole job aiAnalysis status completedAt createdAt emailSent');
 
-    res.json({ sessions });
+    const history = sessions.map((s) => {
+      const score = s.aiAnalysis?.overallScore ?? null;
+      const status =
+        score === null
+          ? 'NOT READY'
+          : score >= 80
+          ? 'READY'
+          : score >= 60
+          ? 'NEEDS PRACTICE'
+          : 'NOT READY';
+      return {
+        _id: s._id,
+        jobId: s.job?._id?.toString() || null,
+        jobRole: s.jobRole,
+        jobTitle: s.job?.title,
+        companyName: s.job?.companyName,
+        prepScore: score,
+        status,
+        completedAt: s.completedAt,
+        emailSent: s.emailSent,
+      };
+    });
+
+    res.json({ sessions: history });
   } catch (error) {
     console.error('Error fetching history:', error);
     res.status(500).json({ error: 'Failed to fetch history' });

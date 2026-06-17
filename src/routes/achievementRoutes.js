@@ -3,16 +3,70 @@ const router = express.Router();
 const Achievement = require('../models/Achievement');
 const Employee = require('../models/Employee');
 const { authenticateToken, requireRole } = require('../middleware/auth');
+const { createNotification } = require('../services/notificationService');
+
+// Get achievement statistics (must be before /:id routes)
+router.get('/stats', authenticateToken, requireRole(['admin', 'hr']), async (req, res) => {
+  try {
+    const stats = await Achievement.aggregate([
+      {
+        $group: {
+          _id: '$type',
+          count: { $sum: 1 },
+          totalPoints: { $sum: '$points' }
+        }
+      }
+    ]);
+
+    const totalAchievements = await Achievement.countDocuments();
+    const thisMonthAchievements = await Achievement.countDocuments({
+      dateAwarded: {
+        $gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+      }
+    });
+
+    res.json({
+      totalAchievements,
+      thisMonthAchievements,
+      byType: stats
+    });
+  } catch (error) {
+    console.error('Error fetching achievement stats:', error);
+    res.status(500).json({ error: 'Failed to fetch achievement statistics' });
+  }
+});
+
+// Get current employee's achievements
+router.get('/me', authenticateToken, async (req, res) => {
+  try {
+    const employee = await Employee.findOne({ user: req.user._id });
+    if (!employee) {
+      return res.status(404).json({ error: 'Employee profile not found' });
+    }
+
+    const achievements = await Achievement.find({
+      employee: employee._id,
+      isActive: true
+    })
+      .populate('awardedBy', 'name email')
+      .sort({ dateAwarded: -1 });
+
+    res.json(achievements);
+  } catch (error) {
+    console.error('Error fetching my achievements:', error);
+    res.status(500).json({ error: 'Failed to fetch achievements' });
+  }
+});
 
 // Get all achievements (admin/hr only)
 router.get('/', authenticateToken, requireRole(['admin', 'hr']), async (req, res) => {
   try {
     const { employeeId, type, limit = 50 } = req.query;
-    
-    let filter = {};
+
+    const filter = {};
     if (employeeId) filter.employee = employeeId;
     if (type) filter.type = type;
-    
+
     const achievements = await Achievement.find(filter)
       .populate({
         path: 'employee',
@@ -24,7 +78,7 @@ router.get('/', authenticateToken, requireRole(['admin', 'hr']), async (req, res
       .populate('awardedBy', 'name email')
       .sort({ dateAwarded: -1 })
       .limit(parseInt(limit));
-    
+
     res.json(achievements);
   } catch (error) {
     console.error('Error fetching achievements:', error);
@@ -36,14 +90,22 @@ router.get('/', authenticateToken, requireRole(['admin', 'hr']), async (req, res
 router.get('/employee/:employeeId', authenticateToken, async (req, res) => {
   try {
     const { employeeId } = req.params;
-    
-    const achievements = await Achievement.find({ 
+    const isAdminOrHr = ['admin', 'hr'].includes(req.user.role);
+
+    if (!isAdminOrHr) {
+      const employee = await Employee.findOne({ user: req.user._id });
+      if (!employee || employee._id.toString() !== employeeId) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+    }
+
+    const achievements = await Achievement.find({
       employee: employeeId,
-      isActive: true 
+      isActive: true
     })
       .populate('awardedBy', 'name email')
       .sort({ dateAwarded: -1 });
-    
+
     res.json(achievements);
   } catch (error) {
     console.error('Error fetching employee achievements:', error);
@@ -63,13 +125,12 @@ router.post('/', authenticateToken, requireRole(['admin', 'hr']), async (req, re
       points,
       level
     } = req.body;
-    
-    // Validate employee exists
-    const employee = await Employee.findById(employeeId);
+
+    const employee = await Employee.findById(employeeId).populate('user', 'name email');
     if (!employee) {
       return res.status(404).json({ error: 'Employee not found' });
     }
-    
+
     const achievement = new Achievement({
       employee: employeeId,
       title,
@@ -80,10 +141,9 @@ router.post('/', authenticateToken, requireRole(['admin', 'hr']), async (req, re
       level,
       awardedBy: req.user._id
     });
-    
+
     await achievement.save();
-    
-    // Populate the response
+
     await achievement.populate([
       {
         path: 'employee',
@@ -97,7 +157,18 @@ router.post('/', authenticateToken, requireRole(['admin', 'hr']), async (req, re
         select: 'name email'
       }
     ]);
-    
+
+    if (employee.user) {
+      await createNotification(
+        employee.user._id,
+        'achievement_awarded',
+        'New Achievement Awarded',
+        `You received "${title}" from ${req.user.name || 'HR/Admin'}.`,
+        { type: 'employee', id: employee._id },
+        '/employee/achievements'
+      );
+    }
+
     res.status(201).json(achievement);
   } catch (error) {
     console.error('Error creating achievement:', error);
@@ -110,7 +181,7 @@ router.put('/:id', authenticateToken, requireRole(['admin', 'hr']), async (req, 
   try {
     const { id } = req.params;
     const updates = req.body;
-    
+
     const achievement = await Achievement.findByIdAndUpdate(
       id,
       { ...updates, updatedAt: new Date() },
@@ -124,11 +195,11 @@ router.put('/:id', authenticateToken, requireRole(['admin', 'hr']), async (req, 
         }
       })
       .populate('awardedBy', 'name email');
-    
+
     if (!achievement) {
       return res.status(404).json({ error: 'Achievement not found' });
     }
-    
+
     res.json(achievement);
   } catch (error) {
     console.error('Error updating achievement:', error);
@@ -136,52 +207,21 @@ router.put('/:id', authenticateToken, requireRole(['admin', 'hr']), async (req, 
   }
 });
 
-// Delete achievement (admin only)
-router.delete('/:id', authenticateToken, requireRole(['admin']), async (req, res) => {
+// Delete achievement (admin/hr only)
+router.delete('/:id', authenticateToken, requireRole(['admin', 'hr']), async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     const achievement = await Achievement.findByIdAndDelete(id);
-    
+
     if (!achievement) {
       return res.status(404).json({ error: 'Achievement not found' });
     }
-    
+
     res.json({ message: 'Achievement deleted successfully' });
   } catch (error) {
     console.error('Error deleting achievement:', error);
     res.status(500).json({ error: 'Failed to delete achievement' });
-  }
-});
-
-// Get achievement statistics
-router.get('/stats', authenticateToken, requireRole(['admin', 'hr']), async (req, res) => {
-  try {
-    const stats = await Achievement.aggregate([
-      {
-        $group: {
-          _id: '$type',
-          count: { $sum: 1 },
-          totalPoints: { $sum: '$points' }
-        }
-      }
-    ]);
-    
-    const totalAchievements = await Achievement.countDocuments();
-    const thisMonthAchievements = await Achievement.countDocuments({
-      dateAwarded: {
-        $gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1)
-      }
-    });
-    
-    res.json({
-      totalAchievements,
-      thisMonthAchievements,
-      byType: stats
-    });
-  } catch (error) {
-    console.error('Error fetching achievement stats:', error);
-    res.status(500).json({ error: 'Failed to fetch achievement statistics' });
   }
 });
 

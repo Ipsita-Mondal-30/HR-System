@@ -2,6 +2,8 @@ const Employee = require('../models/Employee');
 const User = require('../models/User');
 const Payroll = require('../models/Payroll');
 const mongoose = require('mongoose');
+const { createNotification } = require('../services/notificationService');
+const { generatePayslipPdf } = require('../services/payslipPdfService');
 
 // Get all payroll records
 const getAllPayrolls = async (req, res) => {
@@ -205,6 +207,39 @@ const updatePayroll = async (req, res) => {
   }
 };
 
+// Update payroll notes (allowed on any status)
+const updatePayrollNotes = async (req, res) => {
+  try {
+    const payroll = await Payroll.findById(req.params.id);
+
+    if (!payroll) {
+      return res.status(404).json({ message: 'Payroll record not found' });
+    }
+
+    payroll.notes = typeof req.body?.notes === 'string' ? req.body.notes.trim() : '';
+    await payroll.save();
+
+    await payroll.populate([
+      {
+        path: 'employee',
+        populate: {
+          path: 'user',
+          select: 'name email'
+        }
+      },
+      {
+        path: 'approvedBy',
+        select: 'name email'
+      }
+    ]);
+
+    res.json(payroll);
+  } catch (error) {
+    console.error('❌ Error updating payroll notes:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+
 // Approve payroll
 const approvePayroll = async (req, res) => {
   try {
@@ -214,11 +249,31 @@ const approvePayroll = async (req, res) => {
       return res.status(404).json({ message: 'Payroll record not found' });
     }
 
-    if (payroll.status !== 'pending') {
+    if (payroll.status === 'paid') {
+      return res.status(400).json({ message: 'Paid payroll cannot be re-approved' });
+    }
+
+    if (!['pending', 'draft'].includes(payroll.status)) {
       return res.status(400).json({ message: 'Only pending payrolls can be approved' });
     }
 
     await payroll.approve(req.user._id);
+
+    const employee = await Employee.findById(payroll.employee).populate('user', '_id name');
+    if (employee?.user) {
+      const months = [
+        'January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December'
+      ];
+      await createNotification(
+        employee.user._id,
+        'payroll_approved',
+        'Payroll Approved',
+        `Your ${months[payroll.month - 1]} ${payroll.year} payroll has been approved. Net pay: $${payroll.netSalary.toLocaleString()}.`,
+        { type: 'employee', id: employee._id },
+        '/employee/payroll'
+      );
+    }
 
     // Populate the response
     await payroll.populate([
@@ -252,12 +307,46 @@ const markAsPaid = async (req, res) => {
       return res.status(404).json({ message: 'Payroll record not found' });
     }
 
+    if (payroll.status === 'paid') {
+      return res.status(400).json({ message: 'Payroll is already marked as paid' });
+    }
+
+    const paymentDate = req.body?.paymentDate ? new Date(req.body.paymentDate) : new Date();
+
+    // Auto-approve if still pending/draft so HR can mark paid in one step
+    if (['pending', 'draft'].includes(payroll.status)) {
+      payroll.status = 'approved';
+      payroll.approvedBy = req.user._id;
+      payroll.approvedAt = new Date();
+    }
+
     if (payroll.status !== 'approved') {
       return res.status(400).json({ message: 'Only approved payrolls can be marked as paid' });
     }
 
-    const paymentDate = req.body.paymentDate ? new Date(req.body.paymentDate) : new Date();
-    await payroll.markAsPaid(paymentDate);
+    payroll.status = 'paid';
+    payroll.paymentDate = paymentDate;
+    await payroll.save();
+
+    const employee = await Employee.findById(payroll.employee).populate('user', '_id name');
+    if (employee?.user) {
+      const months = [
+        'January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December'
+      ];
+      try {
+        await createNotification(
+          employee.user._id,
+          'payroll_approved',
+          'Payroll Payment Processed',
+          `Your ${months[payroll.month - 1]} ${payroll.year} payroll has been marked as paid.`,
+          { type: 'employee', id: employee._id },
+          '/employee/payroll'
+        );
+      } catch (notifyErr) {
+        console.warn('⚠️ Payroll marked paid but notification failed:', notifyErr.message);
+      }
+    }
 
     // Populate the response
     await payroll.populate([
@@ -279,6 +368,52 @@ const markAsPaid = async (req, res) => {
   } catch (error) {
     console.error('❌ Error marking payroll as paid:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+
+// Download employee payslip PDF
+const downloadEmployeePayslip = async (req, res) => {
+  try {
+    const employee = await Employee.findOne({ user: req.user._id });
+    if (!employee) {
+      return res.status(404).json({ message: 'Employee profile not found' });
+    }
+
+    const payroll = await Payroll.findOne({
+      _id: req.params.id,
+      employee: employee._id,
+      status: { $in: ['approved', 'paid'] }
+    })
+      .populate({
+        path: 'employee',
+        select: 'employeeId position department user',
+        populate: [
+          { path: 'user', select: 'name email' },
+          { path: 'department', select: 'name' }
+        ]
+      })
+      .populate('approvedBy', 'name email');
+
+    if (!payroll) {
+      return res.status(404).json({ message: 'Payroll record not found or not available for download' });
+    }
+
+    const stamped = req.query.stamped === 'true';
+    const pdfBuffer = await generatePayslipPdf(payroll, { stamped });
+
+    const months = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+    const filename = `payslip-${months[payroll.month - 1]}-${payroll.year}${stamped ? '-official' : ''}.pdf`;
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', pdfBuffer.length);
+    res.send(pdfBuffer);
+  } catch (error) {
+    console.error('❌ Error generating payslip PDF:', error);
+    res.status(500).json({ message: 'Failed to generate payslip PDF', error: error.message });
   }
 };
 
@@ -322,7 +457,9 @@ module.exports = {
   getPayrollById,
   createPayroll,
   updatePayroll,
+  updatePayrollNotes,
   approvePayroll,
   markAsPaid,
-  getPayrollStats
+  getPayrollStats,
+  downloadEmployeePayslip
 };

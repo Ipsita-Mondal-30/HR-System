@@ -9,8 +9,8 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-const ALLOWED_RESUME_EXTENSIONS = new Set(['.pdf', '.doc', '.docx']);
-const MAX_RESUME_SIZE_BYTES = 5 * 1024 * 1024;
+const ALLOWED_EXTENSIONS = new Set(['.pdf', '.doc', '.docx']);
+const MAX_SIZE_BYTES = 10 * 1024 * 1024;
 
 const storage = new CloudinaryStorage({
   cloudinary,
@@ -20,7 +20,7 @@ const storage = new CloudinaryStorage({
       .replace(/[^a-zA-Z0-9_-]/g, '_');
 
     return {
-      folder: 'resumes',
+      folder: 'employee-resumes',
       resource_type: 'raw',
       format: ext,
       public_id: `${Date.now()}-${baseName}`,
@@ -30,17 +30,17 @@ const storage = new CloudinaryStorage({
 
 const fileFilter = (req, file, cb) => {
   const ext = path.extname(file.originalname).toLowerCase();
-  if (ALLOWED_RESUME_EXTENSIONS.has(ext)) {
+  if (ALLOWED_EXTENSIONS.has(ext)) {
     cb(null, true);
     return;
   }
-  cb(new Error('Only PDF, DOC, and DOCX files are allowed'));
+  cb(new Error('Resume must be PDF, DOC, or DOCX'));
 };
 
-const upload = multer({
+const employeeResumeUpload = multer({
   storage,
   fileFilter,
-  limits: { fileSize: MAX_RESUME_SIZE_BYTES },
+  limits: { fileSize: MAX_SIZE_BYTES },
 });
 
-module.exports = upload;
+module.exports = employeeResumeUpload;

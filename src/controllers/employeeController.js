@@ -12,7 +12,7 @@ const getAllEmployees = async (req, res) => {
     const employees = await Employee.find({ status: 'active' })
       .populate('user', 'name email phone')
       .populate('department', 'name')
-      .populate('manager', 'user position')
+      .populate({ path: 'manager', select: 'position', populate: { path: 'user', select: 'name email' } })
       .sort({ createdAt: -1 });
 
     const employeesWithStats = await Promise.all(
@@ -112,18 +112,29 @@ const createEmployee = async (req, res) => {
 const updateEmployee = async (req, res) => {
   try {
     const { id } = req.params;
-    const updates = req.body;
+    const { department, manager, managerId, departmentId, skills, position, status, employmentType, salary } = req.body;
 
     console.log('📝 Updating employee:', id);
 
+    const updates = {};
+    if (position !== undefined) updates.position = position;
+    if (status !== undefined) updates.status = status;
+    if (employmentType !== undefined) updates.employmentType = employmentType;
+    if (salary !== undefined) updates.salary = salary;
+    if (skills !== undefined) updates.skills = skills;
+    if (departmentId !== undefined) updates.department = departmentId || null;
+    if (department !== undefined) updates.department = department || null;
+    if (managerId !== undefined) updates.manager = managerId || null;
+    if (manager !== undefined) updates.manager = manager || null;
+
     const employee = await Employee.findByIdAndUpdate(
       id,
-      { ...updates, updatedAt: new Date() },
-      { new: true }
+      { $set: updates },
+      { new: true, runValidators: true }
     )
       .populate('user', 'name email phone')
       .populate('department', 'name')
-      .populate('manager', 'user position');
+      .populate({ path: 'manager', select: 'position', populate: { path: 'user', select: 'name email' } });
 
     if (!employee) {
       return res.status(404).json({ error: 'Employee not found' });

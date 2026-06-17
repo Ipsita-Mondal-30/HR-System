@@ -96,4 +96,15 @@ const projectSchema = new mongoose.Schema({
   timestamps: true
 });
 
+const { applyProjectCompletionStatus } = require('../utils/projectCompletion');
+
+projectSchema.methods.applyCompletionStatus = function applyCompletionStatus() {
+  return applyProjectCompletionStatus(this);
+};
+
+projectSchema.pre('save', function preSave(next) {
+  applyProjectCompletionStatus(this);
+  next();
+});
+
 module.exports = mongoose.model('Project', projectSchema);

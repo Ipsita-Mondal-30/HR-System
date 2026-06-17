@@ -64,7 +64,14 @@ const voiceInterviewSchema = new mongoose.Schema({
     strengths: [String],
     improvements: [String],
     recommendations: [String],
-    detailedFeedback: String
+    detailedFeedback: String,
+    summary: String,
+    resources: [{ title: String, url: String, type: String }],
+    courses: [{ title: String, url: String, platform: String }]
+  },
+  emailSent: {
+    type: Boolean,
+    default: false
   },
   status: {
     type: String,

@@ -18,7 +18,14 @@ const notificationSchema = new mongoose.Schema({
       'profile_viewed',
       'new_job_posted',
       'application_shortlisted',
-      'application_rejected'
+      'application_rejected',
+      'performance_review',
+      'feedback_request',
+      'training_request',
+      'resume_updated',
+      'achievement_awarded',
+      'payroll_approved',
+      'support_request'
     ],
     required: true
   },
@@ -33,7 +40,7 @@ const notificationSchema = new mongoose.Schema({
   relatedEntity: {
     type: {
       type: String,
-      enum: ['job', 'application', 'interview', 'user']
+      enum: ['job', 'application', 'interview', 'user', 'feedback', 'employee']
     },
     id: {
       type: mongoose.Schema.Types.ObjectId
@@ -59,4 +66,5 @@ const notificationSchema = new mongoose.Schema({
 notificationSchema.index({ user: 1, read: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Notification', notificationSchema);
+
 

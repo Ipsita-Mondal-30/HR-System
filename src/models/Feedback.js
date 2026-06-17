@@ -73,6 +73,16 @@ const feedbackSchema = new mongoose.Schema({
       type: Number,
       min: 1,
       max: 5
+    },
+    initiative: {
+      type: Number,
+      min: 1,
+      max: 5
+    },
+    qualityOfWork: {
+      type: Number,
+      min: 1,
+      max: 5
     }
   },
   
@@ -82,6 +92,8 @@ const feedbackSchema = new mongoose.Schema({
     min: 1,
     max: 5
   },
+
+  reviewPeriod: String,
   
   // AI Processing
   aiSummary: {

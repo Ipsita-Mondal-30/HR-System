@@ -122,3 +122,4 @@ router.delete('/:draftId', verifyJWT, isCandidate, async (req, res) => {
 
 module.exports = router;
 
+

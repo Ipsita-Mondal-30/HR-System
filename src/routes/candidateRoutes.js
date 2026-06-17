@@ -135,7 +135,15 @@ router.post('/apply-with-resume', verifyJWT, isCandidate, async (req, res) => {
   upload.single('resume')(req, res, async (err) => {
     if (err) {
       console.error('File upload error:', err);
-      return res.status(400).json({ error: 'File upload failed' });
+      let message = 'File upload failed. Please use a PDF, DOC, or DOCX under 5MB.';
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        message = 'Resume must be 5MB or smaller.';
+      } else if (err.message?.includes('Only PDF, DOC, and DOCX')) {
+        message = err.message;
+      } else if (err.message?.includes('file format') || err.message?.includes('not allowed')) {
+        message = 'Resume must be a PDF, DOC, or DOCX file (max 5MB).';
+      }
+      return res.status(400).json({ error: message });
     }
 
     try {
@@ -176,8 +184,10 @@ router.post('/apply-with-resume', verifyJWT, isCandidate, async (req, res) => {
         return res.status(404).json({ error: 'Job not found' });
       }
 
-      // Get resume URL from uploaded file
-      const resumeUrl = req.file ? req.file.path : user.resumeUrl || '';
+      // Get resume URL from uploaded file (Cloudinary sets path to secure_url)
+      const resumeUrl = req.file
+        ? req.file.path || req.file.secure_url || req.file.url || ''
+        : user.resumeUrl || '';
 
       // Create application with comprehensive data
       const application = new Application({
@@ -506,9 +516,9 @@ function calculateProfileCompleteness(user) {
     { field: 'education', weight: 5, required: false },
 
     // Portfolio & Links (20% weight)
-    { field: 'portfolioUrl', weight: 5, required: false },
-    { field: 'linkedInUrl', weight: 5, required: false },
-    { field: 'githubUrl', weight: 5, required: false },
+    { field: 'portfolio', weight: 5, required: false },
+    { field: 'linkedIn', weight: 5, required: false },
+    { field: 'github', weight: 5, required: false },
     { field: 'website', weight: 5, required: false },
 
     // Additional Information (10% weight)
@@ -585,568 +595,50 @@ router.get('/interviews', verifyJWT, isCandidate, async (req, res) => {
   }
 });
 
-// Get AI-powered interview preparation
+// Get AI-powered interview preparation (recent voice interview + Gemini insights)
 router.get('/interview-prep', verifyJWT, isCandidate, async (req, res) => {
   try {
-    const candidateId = req.user._id;
-    console.log('🤖 Generating AI interview prep for candidate:', candidateId);
-    console.log('🤖 Starting interview prep generation process...');
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
 
-    const user = await User.findById(candidateId);
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    // Get candidate's recent applications to understand target roles
-    const recentApplications = await Application.find({ candidate: candidateId })
-      .populate('job', 'title skills requirements description')
+    const applications = await Application.find({ candidate: req.user._id })
+      .populate('job', 'title skills requirements description companyName')
       .sort({ createdAt: -1 })
       .limit(5);
 
-    // Determine primary role based on applications
-    const targetRoles = recentApplications.map(app => app.job?.title).filter(Boolean);
-    const primaryRole = targetRoles[0] || 'Software Developer';
-
-    // Generate AI-powered interview prep
-    const agent = require('../controllers/agentController');
-
-    const prepPrompt = `Generate comprehensive interview preparation for a candidate applying for ${primaryRole} positions.
-
-    Candidate Profile:
-    - Name: ${user.name}
-    - Skills: ${user.skills?.join(', ') || 'Not specified'}
-    - Experience: ${user.experience || 'Not specified'}
-    - Education: ${user.education || 'Not specified'}
-    - Recent Applications: ${targetRoles.join(', ')}
-
-    Generate a JSON response with:
-    1. "questions": Array of 5 most likely interview questions for this role
-    2. "skillGaps": Analysis of missing skills compared to job requirements
-    3. "strengths": Key strengths based on candidate profile
-    4. "preparationTips": 3-5 specific preparation recommendations
-    5. "technicalTopics": Key technical areas to focus on
-
-    Make it specific to the candidate's background and target role.`;
-
-    // Simplified approach - generate fallback response with some AI enhancement
-    console.log('🤖 Generating interview prep with AI assistance...');
-
-    try {
-      // Try to get AI-enhanced content
-      const agent = require('../controllers/agentController');
-      const mockReq = { body: { prompt: prepPrompt } };
-
-      // Create a promise to handle the AI response
-      const aiResponse = await new Promise((resolve, reject) => {
-        const mockRes = {
-          json: (data) => {
-            console.log('🤖 AI Response received:', data);
-            resolve(data);
-          },
-          status: () => ({
-            json: (data) => {
-              console.log('🤖 AI Error response:', data);
-              resolve({ error: true, response: null });
-            }
-          })
-        };
-
-        agent.generateResponse(mockReq, mockRes).catch(reject);
-      });
-
-      let prepData = {};
-
-      // Try to parse AI response
-      if (aiResponse && !aiResponse.error && aiResponse.response) {
-        try {
-          const jsonMatch = aiResponse.response.match(/\{[\s\S]*\}/);
-          if (jsonMatch) {
-            prepData = JSON.parse(jsonMatch[0]);
-            console.log('✅ Successfully parsed AI response');
-          }
-        } catch (parseError) {
-          console.log('⚠️ Could not parse AI response as JSON, using fallback');
-        }
-      }
-
-      // Generate comprehensive response with AI enhancement or fallback
-      const interviewPrep = {
-        questions: prepData.questions || [
-          `Tell me about your experience with ${user.skills?.[0] || 'programming'} and how you've applied it in real projects.`,
-          `How would you approach solving a complex ${primaryRole.toLowerCase()} problem that you've never encountered before?`,
-          `What interests you most about this ${primaryRole} position and our company?`,
-          `Describe a challenging project you've worked on and how you overcame obstacles.`,
-          `How do you stay updated with the latest technologies and industry trends?`
-        ],
-        skillGaps: prepData.skillGaps || {
-          missing: ['Advanced system design', 'Cloud platforms', 'Microservices architecture'],
-          recommended: ['Take online courses in system design', 'Build cloud-based projects', 'Practice with distributed systems']
-        },
-        strengths: prepData.strengths || [
-          `Strong foundation in ${user.skills?.[0] || 'programming'}`,
-          'Problem-solving and analytical thinking',
-          'Continuous learning mindset',
-          'Technical communication skills'
-        ],
-        preparationTips: prepData.preparationTips || [
-          'Review fundamental concepts in your primary programming languages',
-          'Practice coding problems on platforms like LeetCode or HackerRank',
-          'Research the company culture, values, and recent projects',
-          'Prepare specific STAR method examples from your experience',
-          'Practice explaining technical concepts to non-technical audiences'
-        ],
-        technicalTopics: prepData.technicalTopics || [
-          'Data structures and algorithms',
-          'System design and architecture',
-          'Database design and optimization',
-          'API design and best practices',
-          'Testing strategies and debugging',
-          'Version control and collaboration tools'
-        ],
-        profileScore: calculateProfileCompleteness(user),
-        targetRole: primaryRole,
-        generatedAt: new Date().toISOString(),
-        aiEnhanced: !!prepData.questions
-      };
-
-      console.log('✅ Interview prep generated successfully');
-      res.json(interviewPrep);
-
-    } catch (aiError) {
-      console.error('🔥 AI generation failed, using fallback:', aiError);
-
-      // Complete fallback response
-      const interviewPrep = {
-        questions: [
-          `Tell me about your experience with ${user.skills?.[0] || 'programming'} and how you've applied it in real projects.`,
-          `How would you approach solving a complex ${primaryRole.toLowerCase()} problem that you've never encountered before?`,
-          `What interests you most about this ${primaryRole} position and our company?`,
-          `Describe a challenging project you've worked on and how you overcame obstacles.`,
-          `How do you stay updated with the latest technologies and industry trends?`
-        ],
-        skillGaps: {
-          missing: ['Advanced system design', 'Cloud platforms'],
-          recommended: ['Take online courses', 'Build portfolio projects']
-        },
-        strengths: [
-          `Experience with ${user.skills?.[0] || 'programming'}`,
-          'Problem-solving mindset',
-          'Continuous learning attitude'
-        ],
-        preparationTips: [
-          'Review your technical skills thoroughly',
-          'Practice coding problems regularly',
-          'Research the company and role',
-          'Prepare behavioral examples using STAR method',
-          'Practice mock interviews'
-        ],
-        technicalTopics: [
-          'Core programming concepts',
-          'Problem-solving techniques',
-          'Best practices and code quality',
-          'Testing and debugging approaches'
-        ],
-        profileScore: calculateProfileCompleteness(user),
-        targetRole: primaryRole,
-        generatedAt: new Date().toISOString(),
-        aiEnhanced: false
-      };
-
-      res.json(interviewPrep);
-    }
-
+    const dashboardAIService = require('../services/dashboardAIService');
+    const data = await dashboardAIService.generateInterviewPrepDashboard(user, applications);
+    res.json(data);
   } catch (error) {
     console.error('Error generating interview prep:', error);
     res.status(500).json({ error: 'Failed to generate interview preparation' });
   }
 });
 
-// Get AI-powered profile analysis
+// Get AI-powered profile analysis (resume + job market + Gemini/Cohere)
 router.get('/profile-analysis', verifyJWT, isCandidate, async (req, res) => {
   try {
-    const candidateId = req.user._id;
-    console.log('🔍 Generating AI profile analysis for candidate:', candidateId);
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
 
-    const user = await User.findById(candidateId);
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    // Get candidate's applications for context
-    const applications = await Application.find({ candidate: candidateId })
-      .populate('job', 'title skills requirements')
+    const applications = await Application.find({ candidate: req.user._id })
+      .populate('job', 'title skills requirements companyName')
       .sort({ createdAt: -1 })
       .limit(5);
 
-    // Get job market data to analyze skill demand
-    const Job = require('../models/Job');
-    const recentJobs = await Job.find({ 
-      status: { $in: ['active', 'open'] }, 
-      isApproved: true,
-      $or: [
-        { skills: { $exists: true, $ne: [] } },
-        { skills: { $exists: true, $type: 'array', $size: { $gt: 0 } } }
-      ]
-    })
-    .select('title skills location employmentType experienceRequired minSalary maxSalary')
-    .limit(200) // Increase to get better data
-    .lean();
-
-    // Extract and analyze skill demand from job market
-    const skillFrequency = {};
-    const locationFrequency = {};
-    const roleFrequency = {};
-    
-    recentJobs.forEach(job => {
-      (job.skills || []).forEach(skill => {
-        const normalizedSkill = skill.toLowerCase().trim();
-        skillFrequency[normalizedSkill] = (skillFrequency[normalizedSkill] || 0) + 1;
-      });
-      if (job.location) {
-        const loc = job.location.toLowerCase();
-        locationFrequency[loc] = (locationFrequency[loc] || 0) + 1;
-      }
-      if (job.title) {
-        roleFrequency[job.title.toLowerCase()] = (roleFrequency[job.title.toLowerCase()] || 0) + 1;
-      }
-    });
-
-    const topSkills = Object.entries(skillFrequency)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 20)
-      .map(([skill]) => skill);
-    
-    const topLocations = Object.entries(locationFrequency)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 10)
-      .map(([loc]) => loc);
-
-    // Normalize candidate skills for better matching
-    const candidateSkills = (user.skills || []).map(s => {
-      const normalized = s.toLowerCase().trim();
-      // Handle common variations
-      const variations = {
-        'react': ['reactjs', 'react.js', 'react js'],
-        'node': ['nodejs', 'node.js', 'node js'],
-        'javascript': ['js', 'ecmascript'],
-        'typescript': ['ts'],
-        'mongodb': ['mongo'],
-        'postgresql': ['postgres'],
-        'aws': ['amazon web services'],
-        'docker': ['docker container']
-      };
-      const baseSkill = Object.keys(variations).find(k => 
-        normalized.includes(k) || variations[k].some(v => normalized.includes(v))
-      );
-      return baseSkill || normalized;
-    });
-
-    // More intelligent missing skills detection
-    const missingSkills = topSkills
-      .filter(skill => {
-        const normalizedSkill = skill.toLowerCase().trim();
-        // Check if candidate has this skill or a variation
-        return !candidateSkills.some(cs => {
-          // Exact match
-          if (cs === normalizedSkill) return true;
-          // Contains match (but avoid too broad matches)
-          if (cs.length > 3 && normalizedSkill.length > 3) {
-            return cs.includes(normalizedSkill) || normalizedSkill.includes(cs);
-          }
-          return false;
-        });
-      })
-      .slice(0, 10);
-
-    const completeness = calculateProfileCompleteness(user);
-    
-    // Try Gemini first, then Cohere, then fallback
-    let analysis = null;
-    
-    // Try Gemini
-    try {
-      const geminiService = require('../services/geminiService');
-      const profileContext = `
-    Candidate Profile:
-    - Name: ${user.name}
-- Email: ${user.email}
-- Skills Listed in Profile: ${user.skills?.join(', ') || 'Not specified'}
-    - Experience: ${user.experience || 'Not specified'}
-    - Education: ${user.education || 'Not specified'}
-    - Bio: ${user.bio || 'Not specified'}
-- Portfolio: ${user.portfolioUrl || 'Not provided'}
-- LinkedIn: ${user.linkedInUrl || 'Not provided'}
-- GitHub: ${user.githubUrl || 'Not provided'}
-- Resume: ${user.resumeUrl ? 'Uploaded' : 'Not uploaded'}
-${resumeContent ? `- Resume Content (extracted text): ${resumeContent.substring(0, 500)}...` : ''}
-- Profile Completeness: ${completeness}%
-
-Recent Job Applications: ${applications.map(app => `${app.job?.title} at ${app.job?.companyName || 'Company'}`).join(', ') || 'None'}
-
-Target Roles: ${applications.map(app => app.job?.title).filter((v, i, a) => a.indexOf(v) === i).join(', ') || 'Not specified'}
-
-CURRENT JOB MARKET ANALYSIS (from ${recentJobs.length} recent active job postings - 2024-2025 data):
-- Top Skills in Demand: ${topSkills.slice(0, 20).map((s, i) => `${i + 1}. ${s} (${skillFrequency[s]} jobs)`).join(', ')}
-- Top Hiring Locations: ${topLocations.slice(0, 5).map((l, i) => `${i + 1}. ${l.charAt(0).toUpperCase() + l.slice(1)} (${locationFrequency[l]} jobs)`).join(', ')}
-- Candidate's Current Skills: ${user.skills?.join(', ') || 'None'}
-- Skills in Resume/Profile: ${user.skills?.join(', ') || 'None'}${resumeContent ? ' (also check resume content above)' : ''}
-- Missing High-Demand Skills (from top ${topSkills.length} skills): ${missingSkills.slice(0, 10).map(s => `${s} (appears in ${skillFrequency[s]} jobs)`).join(', ')}
-      `.trim();
-
-      const analysisPrompt = `You are an expert career coach and recruiter analyzing a candidate's profile against CURRENT job market trends in 2024-2025.
-
-${profileContext}
-
-CRITICAL REQUIREMENTS:
-1. Analyze ACTUAL job market data provided above - ${recentJobs.length} recent active job postings
-2. Compare candidate's skills (${user.skills?.join(', ') || 'None provided'}) with top skills in demand
-3. Identify skills that appear frequently in job postings but are MISSING from candidate's profile
-4. Provide SPECIFIC course recommendations with real platforms (Coursera, Udemy, freeCodeCamp, YouTube, Pluralsight, etc.)
-5. Analyze CURRENT hiring trends (not generic advice)
-
-Analyze and provide feedback in JSON format:
-{
-  "overallScore": <number 1-100, based on profile completeness AND alignment with current job market demand>,
-  "strengths": [<array of 4-6 SPECIFIC strengths - reference their actual skills and what makes them valuable>],
-  "improvements": [<array of 4-6 SPECIFIC areas - reference what they're missing compared to job market>],
-  "marketability": "<3-4 sentence assessment: How attractive is this candidate to employers RIGHT NOW based on current market trends? Reference specific skills demand.>",
-  "recommendations": [<array of 5-7 ACTIONABLE recommendations based on job market analysis - be specific about what to add/improve>],
-  "roleAlignment": "<3-4 sentence assessment: How well does their profile match their target roles? Reference specific gaps.>",
-  "missingSkills": [<array of 3-5 skills that appear in ${topSkills.slice(0, 10).join(', ')} but are NOT in candidate's skills list. These should be actual skills from the job market analysis, not generic ones>],
-  "skillCourses": [<array of 3-5 course objects with format: {"skill": "Exact skill name from missingSkills", "courseTitle": "Specific course name (e.g. 'React - The Complete Guide 2024')", "platform": "Udemy|Coursera|freeCodeCamp|YouTube|Pluralsight", "reason": "Why this course helps them get jobs - reference demand: 'Appears in X% of job postings' or similar">],
-  "jobMarketTrends": "<4-5 sentence CURRENT market analysis: What skills are HOT right now? Which locations/cities are hiring? What's the trend for ${applications.map(app => app.job?.title).filter((v, i, a) => a.indexOf(v) === i).slice(0, 2).join(' and ') || 'software development'} roles? Reference actual data from the ${recentJobs.length} job postings analyzed.>"
-}
-
-EXAMPLES:
-- Good missingSkills: ["React.js", "Node.js", "AWS", "Docker"] (if these appear in job market but not in candidate skills)
-- Bad missingSkills: ["Communication", "Teamwork"] (too generic)
-- Good skillCourses: [{"skill": "React.js", "courseTitle": "React - The Complete Guide (incl Hooks, React Router, Redux)", "platform": "Udemy", "reason": "React appears in 60% of frontend job postings. This course covers all fundamentals."}]
-
-Return ONLY valid JSON, no other text.`;
-
-      const { GoogleGenerativeAI } = require('@google/generative-ai');
-      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-      const geminiModel = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-      const result = await geminiModel.generateContent(analysisPrompt);
-      const response = await result.response;
-      const text = response.text();
-      
-      // Parse JSON
-      let jsonMatch = text.match(/\{[\s\S]*?\}/);
-      if (!jsonMatch) {
-        jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
-        if (jsonMatch) jsonMatch = [jsonMatch[1]];
-      }
-      
-      if (jsonMatch) {
-        analysis = JSON.parse(jsonMatch[0]);
-        console.log('✅ Profile analysis generated with Gemini');
-      }
-    } catch (geminiError) {
-      console.log('⚠️ Gemini failed, trying Cohere...', geminiError.message);
-      
-      // Try Cohere
-      try {
-        const { CohereClient } = require('cohere-ai');
-        const cohere = new CohereClient({ token: process.env.COHERE_API_KEY });
-        
-        const profileText = `
-Candidate: ${user.name}
-Skills: ${user.skills?.join(', ') || 'Not specified'}
-Experience: ${user.experience || 'Not specified'}
-Education: ${user.education || 'Not specified'}
-Bio: ${user.bio || 'Not specified'}
-Portfolio: ${user.portfolioUrl ? 'Yes' : 'No'}
-LinkedIn: ${user.linkedInUrl ? 'Yes' : 'No'}
-GitHub: ${user.githubUrl ? 'Yes' : 'No'}
-Resume: ${user.resumeUrl ? 'Yes' : 'No'}
-Target Roles: ${applications.map(app => app.job?.title).filter((v, i, a) => a.indexOf(v) === i).join(', ') || 'Not specified'}
-        `.trim();
-
-        const coherePrompt = `Analyze this candidate profile and provide a JSON response:
-
-${profileText}
-
-Return JSON with:
-{
-  "overallScore": <1-100>,
-  "strengths": [<array of strengths>],
-  "improvements": [<array of improvements>],
-  "marketability": "<assessment>",
-  "recommendations": [<array of recommendations>],
-  "roleAlignment": "<assessment>"
-}
-
-Be specific and constructive.`;
-
-        const response = await cohere.chat({
-          message: coherePrompt,
-          model: 'command-r',
-          temperature: 0.7
-        });
-        
-        const responseText = response.text;
-        const jsonMatch = responseText.match(/\{[\s\S]*?\}/);
-        if (jsonMatch) {
-          analysis = JSON.parse(jsonMatch[0]);
-          console.log('✅ Profile analysis generated with Cohere');
-        }
-      } catch (cohereError) {
-        console.log('⚠️ Cohere failed, using fallback...', cohereError.message);
-      }
-    }
-
-    // Use AI analysis if available, otherwise use enhanced fallback
-    const hasResume = !!user.resumeUrl;
-    const hasSkills = user.skills && user.skills.length > 0;
-    const hasExperience = !!user.experience;
-    const hasPortfolio = !!user.portfolioUrl;
-    const hasLinkedIn = !!user.linkedInUrl;
-    const hasGitHub = !!user.githubUrl;
-
-    let profileAnalysis;
-    
-    if (analysis && typeof analysis.overallScore === 'number') {
-      // Use AI-generated analysis
-      profileAnalysis = {
-        overallScore: Math.max(1, Math.min(100, analysis.overallScore)),
-        strengths: Array.isArray(analysis.strengths) ? analysis.strengths : [],
-        improvements: Array.isArray(analysis.improvements) ? analysis.improvements : [],
-        marketability: analysis.marketability || 'Good foundation with room for growth',
-        recommendations: Array.isArray(analysis.recommendations) ? analysis.recommendations : [],
-        roleAlignment: analysis.roleAlignment || 'Developing alignment with target roles',
-        missingSkills: Array.isArray(analysis.missingSkills) ? analysis.missingSkills : missingSkills.slice(0, 5),
-        skillCourses: Array.isArray(analysis.skillCourses) ? analysis.skillCourses : [],
-        jobMarketTrends: analysis.jobMarketTrends || `Based on ${recentJobs.length} recent job postings, ${topSkills.slice(0, 3).join(', ')} are among the most in-demand skills.`,
-        profileCompleteness: completeness,
-        lastUpdated: user.updatedAt || user.createdAt,
-        generatedAt: new Date().toISOString(),
-        insights: {
-          hasResume,
-          skillsCount: user.skills?.length || 0,
-          hasExperience,
-          hasPortfolio,
-          socialProfiles: [hasLinkedIn, hasGitHub].filter(Boolean).length,
-          recentApplications: applications.length
-        }
-      };
-    } else {
-      // Enhanced fallback analysis (job market data is already computed above)
-    const strengths = [];
-    const improvements = [];
-    const recommendations = [];
-
-      // Add missing skills recommendations from market analysis
-      if (missingSkills.length > 0) {
-        improvements.push(`Consider adding these high-demand skills to your resume: ${missingSkills.slice(0, 3).join(', ')}`);
-      }
-
-      // Analyze strengths with more detail
-      if (hasResume) strengths.push('Professional resume uploaded and accessible to employers');
-      if (hasSkills) {
-        const skillCount = user.skills.length;
-        strengths.push(`Strong technical foundation with ${skillCount} skill${skillCount > 1 ? 's' : ''} defined: ${user.skills.slice(0, 3).join(', ')}${skillCount > 3 ? '...' : ''}`);
-      }
-      if (hasExperience) strengths.push('Work experience documented, showing career progression');
-      if (hasPortfolio) strengths.push('Portfolio showcasing projects and technical capabilities');
-      if (hasLinkedIn) strengths.push('Professional LinkedIn presence for networking');
-      if (hasGitHub) strengths.push('Active GitHub profile demonstrating coding ability');
-      if (user.education) strengths.push(`Educational background: ${user.education}`);
-      if (user.bio) strengths.push('Professional bio/summary providing context');
-
-      // Analyze improvements with specific guidance
-      if (!hasResume) improvements.push('Upload a professional resume - this significantly improves your profile visibility');
-      if (!hasSkills || user.skills.length < 5) {
-        improvements.push(`Add more technical skills (currently ${user.skills?.length || 0} skills) - aim for 5-10 relevant skills`);
-      }
-      if (!hasExperience) improvements.push('Add detailed work experience including company names, roles, and key achievements');
-      if (!hasPortfolio) improvements.push('Create a portfolio showcasing 2-3 of your best projects with descriptions');
-      if (!hasLinkedIn) improvements.push('Connect your LinkedIn profile to enhance professional credibility');
-      if (!hasGitHub) improvements.push('Link your GitHub profile to showcase code samples and project repositories');
-      if (!user.bio) improvements.push('Add a compelling professional bio (2-3 sentences) highlighting your expertise and career goals');
-
-      // Generate targeted recommendations based on profile state
-    if (completeness < 50) {
-        recommendations.push('Priority: Complete basic profile information - upload resume, add skills, and experience');
-        recommendations.push('Upload your resume first - this is the most important profile element');
-        recommendations.push('Add at least 5 technical skills relevant to your target roles');
-    } else if (completeness < 80) {
-        recommendations.push('Enhance your profile by adding portfolio projects that demonstrate your skills');
-        recommendations.push('Connect your professional social media profiles (LinkedIn, GitHub) for credibility');
-        recommendations.push('Write a compelling bio that summarizes your expertise and career objectives');
-        recommendations.push('Keep your skills list updated with the latest technologies in your field');
-    } else {
-        recommendations.push('Your profile is strong! Keep it updated with recent projects and achievements');
-        recommendations.push('Consider adding certifications, publications, or speaking engagements if applicable');
-        recommendations.push('Regularly update your skills to reflect current industry trends');
-        recommendations.push('Maintain active engagement on LinkedIn and GitHub to show ongoing professional development');
-      }
-
-      // Enhanced marketability assessment
-    let marketability;
-      const strongIndicators = [hasResume, hasSkills && user.skills.length >= 5, hasExperience, hasPortfolio || hasGitHub].filter(Boolean).length;
-      
-      if (completeness >= 90 && strongIndicators >= 3) {
-        marketability = 'Excellent market presence - highly attractive to employers with strong professional foundation';
-      } else if (completeness >= 70 && strongIndicators >= 2) {
-        marketability = 'Strong market presence with good employer appeal - well-positioned for opportunities';
-    } else if (completeness >= 50) {
-        marketability = 'Moderate market presence - completing key profile elements will significantly improve attractiveness';
-    } else {
-        marketability = 'Developing market presence - focus on completing essential profile elements (resume, skills, experience)';
-    }
-
-      // Enhanced role alignment assessment
-    let roleAlignment;
-      const targetRoles = applications.map(app => app.job?.title).filter((v, i, a) => a.indexOf(v) === i);
-    if (targetRoles.length > 0) {
-        const primaryRole = targetRoles[0];
-        const roleMatch = hasSkills && hasExperience ? 'strong' : hasSkills || hasExperience ? 'developing' : 'needs improvement';
-        roleAlignment = `Targeting ${primaryRole} roles with ${roleMatch} alignment - ${hasSkills && hasExperience ? 'your skills and experience align well' : hasSkills ? 'add more experience details' : hasExperience ? 'highlight relevant technical skills' : 'focus on building relevant skills and experience'}`;
-    } else {
-        roleAlignment = 'No recent applications - consider applying to positions that match your skills and career goals';
-      }
-
-      // Add missing skills and courses in fallback
-      const fallbackCourses = missingSkills.slice(0, 5).map(skill => ({
-        skill: skill.charAt(0).toUpperCase() + skill.slice(1),
-        courseTitle: `${skill.charAt(0).toUpperCase() + skill.slice(1)} Complete Course`,
-        platform: 'Udemy',
-        reason: `High demand skill in current job market - appears in ${skillFrequency[skill] || 1} job postings`
-      }));
-
-      profileAnalysis = {
-        overallScore: Math.max(completeness - 10, Math.min(completeness + 10, completeness + (strongIndicators * 5))), // Adjusted score based on quality indicators
-      strengths: strengths.length > 0 ? strengths : ['Professional foundation established'],
-      improvements: improvements.length > 0 ? improvements : ['Profile is well-developed'],
-      marketability,
-      recommendations,
-      roleAlignment,
-        missingSkills: missingSkills.slice(0, 5).map(s => s.charAt(0).toUpperCase() + s.slice(1)),
-        skillCourses: fallbackCourses,
-        jobMarketTrends: `Based on analysis of ${recentJobs.length} recent job postings, top skills in demand include: ${topSkills.slice(0, 5).map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(', ')}. ${topLocations.length > 0 ? `Top hiring locations: ${topLocations.slice(0, 3).map(l => l.charAt(0).toUpperCase() + l.slice(1)).join(', ')}.` : ''}`,
-      profileCompleteness: completeness,
-      lastUpdated: user.updatedAt || user.createdAt,
-      generatedAt: new Date().toISOString(),
-      insights: {
-        hasResume,
-        skillsCount: user.skills?.length || 0,
-        hasExperience,
-        hasPortfolio,
-        socialProfiles: [hasLinkedIn, hasGitHub].filter(Boolean).length,
-        recentApplications: applications.length
-      }
-    };
-    }
-
-    console.log('✅ Profile analysis generated successfully');
+    const dashboardAIService = require('../services/dashboardAIService');
+    const profileAnalysis = await dashboardAIService.generateProfileAnalysis(
+      user,
+      applications,
+      calculateProfileCompleteness
+    );
     res.json(profileAnalysis);
-
   } catch (error) {
     console.error('Error generating profile analysis:', error);
     res.status(500).json({ error: 'Failed to generate profile analysis' });
   }
 });
+
 
 // Get candidate's applications
 router.get('/applications', verifyJWT, isCandidate, async (req, res) => {
@@ -1155,7 +647,11 @@ router.get('/applications', verifyJWT, isCandidate, async (req, res) => {
     console.log('📋 Fetching applications for candidate:', candidateId);
 
     const applications = await Application.find({ candidate: candidateId })
-      .populate('job', 'title companyName location employmentType minSalary maxSalary status')
+      .populate({
+        path: 'job',
+        select: 'title companyName location employmentType minSalary maxSalary status skills description',
+        populate: { path: 'department', select: 'name' },
+      })
       .sort({ createdAt: -1 });
 
     console.log(`📋 Found ${applications.length} applications for candidate`);
@@ -1163,6 +659,81 @@ router.get('/applications', verifyJWT, isCandidate, async (req, res) => {
   } catch (error) {
     console.error('Error fetching candidate applications:', error);
     res.status(500).json({ error: 'Failed to fetch applications' });
+  }
+});
+
+// Gemini AI analysis for a single application (candidate)
+router.post('/applications/:id/analyze', verifyJWT, isCandidate, async (req, res) => {
+  try {
+    const candidateId = req.user._id;
+    const application = await Application.findOne({
+      _id: req.params.id,
+      candidate: candidateId,
+    }).populate({
+      path: 'job',
+      populate: { path: 'department', select: 'name' },
+    });
+
+    if (!application || !application.job) {
+      return res.status(404).json({ error: 'Application not found' });
+    }
+
+    const user = await User.findById(candidateId);
+    const geminiService = require('../services/geminiService');
+    const axios = require('axios');
+    const pdfParse = require('pdf-parse');
+
+    let resumeText = application.resumeText || '';
+    if (!resumeText && application.resumeUrl?.startsWith('http')) {
+      try {
+        const pdfRes = await axios.get(application.resumeUrl, {
+          responseType: 'arraybuffer',
+          timeout: 10000,
+        });
+        const parsed = await pdfParse(pdfRes.data);
+        resumeText = parsed.text || '';
+      } catch (e) {
+        console.warn('Resume parse skipped:', e.message);
+      }
+    }
+    if (!resumeText && user) {
+      resumeText = [
+        `Name: ${user.name}`,
+        `Skills: ${(user.skills || []).join(', ')}`,
+        `Experience: ${user.experience || 'N/A'}`,
+        `Bio: ${user.bio || ''}`,
+        application.coverLetter ? `Cover: ${application.coverLetter}` : '',
+      ]
+        .filter(Boolean)
+        .join('. ');
+    }
+
+    const { matchScore, matchInsights } = await geminiService.analyzeApplication({
+      jobTitle: application.job.title,
+      companyName: application.job.companyName,
+      jobDescription: application.job.description || '',
+      jobSkills: application.job.skills || [],
+      resumeText,
+      coverLetter: application.coverLetter || application.applicationData?.whyInterested || '',
+      candidateSkills: user?.skills || [],
+      candidateExperience: user?.experience || '',
+      applicationStatus: application.status,
+    });
+
+    application.matchScore = matchScore;
+    application.matchInsights = matchInsights;
+    if (resumeText && !application.resumeText) {
+      application.resumeText = resumeText.slice(0, 15000);
+    }
+    await application.save();
+
+    res.json({
+      matchScore: application.matchScore,
+      matchInsights: application.matchInsights,
+    });
+  } catch (error) {
+    console.error('Error analyzing application:', error);
+    res.status(500).json({ error: 'Failed to generate AI analysis' });
   }
 });
 

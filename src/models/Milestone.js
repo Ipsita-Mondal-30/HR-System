@@ -64,6 +64,21 @@ const milestoneSchema = new mongoose.Schema({
   dependencies: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Milestone'
+  }],
+
+  // Deadline reminder tracking
+  deadlineReminderSent: Date,
+  overdueReminderSent: Date,
+
+  // Employee progress responses
+  responses: [{
+    employee: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Employee'
+    },
+    message: String,
+    completionPercentage: Number,
+    createdAt: { type: Date, default: Date.now }
   }]
 }, {
   timestamps: true

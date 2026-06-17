@@ -104,7 +104,7 @@ app.use(
     },
     credentials: true,
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     optionsSuccessStatus: 200,
   })
 );
@@ -185,6 +185,7 @@ app.use('/api/users', require('./routes/userRoutes'));
 app.use('/api/candidate', require('./routes/candidateRoutes'));
 app.use('/api/hr', require('./routes/hrRoutes'));
 app.use('/api/employees', require('./routes/employeeRoutes'));
+app.use('/api/projects', require('./routes/projectChatRoutes'));
 app.use('/api/projects', require('./routes/projectRoutes'));
 app.use('/api/feedback', require('./routes/feedbackRoutes'));
 app.use('/api/okrs', require('./routes/okrRoutes'));
@@ -268,6 +269,9 @@ app.use((err, req, res, next) => {
 });
 
 // Start server
+const http = require('http');
+const { initProjectSocket } = require('./socket/projectSocket');
+
 async function startServer() {
   try {
     console.log('🚀 Starting HR Server...\n');
@@ -286,10 +290,22 @@ async function startServer() {
     console.log(`👥 Found ${userCount} users in database`);
 
     const port = PORT || 8080;
-    app.listen(port, () => {
+    const server = http.createServer(app);
+    initProjectSocket(server, app);
+
+    server.listen(port, () => {
       console.log(`\n🌐 HR Server running on ${BASE_URL}`);
       console.log('🔗 Connected to MongoDB');
       console.log(`📊 Database: ${mongoose.connection.db.databaseName}`);
+      console.log('🔌 WebSocket (project chat) enabled');
+
+      const { checkAndNotifyMilestoneDeadlines } = require('./services/milestoneDeadlineService');
+      checkAndNotifyMilestoneDeadlines().catch(() => {});
+      setInterval(() => {
+        checkAndNotifyMilestoneDeadlines().catch((err) =>
+          console.warn('Milestone deadline check:', err.message)
+        );
+      }, 60 * 60 * 1000);
     });
   } catch (error) {
     console.error('❌ Failed to start server:', error);
