@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const passport = require('passport');
 const router = express.Router();
 const User = require('../models/User');
+const { verifyJWT } = require('../middleware/auth');
 
 // Manual login endpoint (for users who exist in database)
 router.post('/login', async (req, res) => {
@@ -11,15 +12,21 @@ router.post('/login', async (req, res) => {
     console.log('🔐 Manual login attempt for:', email);
     
     // Find user in your database
-    const user = await User.findOne({ email: email.toLowerCase() });
+    const user = await User.findOne({ email: email.toLowerCase() }).select('+password');
     
     if (!user) {
       console.log('❌ User not found:', email);
       return res.status(401).json({ error: 'User not found. Please use Google OAuth to create an account.' });
     }
+
+    if (user.password) {
+      const { verifyPassword } = require('../utils/password');
+      if (!password || !verifyPassword(password, user.password)) {
+        return res.status(401).json({ error: 'Invalid email or password' });
+      }
+    }
     
-    // For now, we'll accept any password for existing users (you can add bcrypt later)
-    // In production, you should verify the password hash
+    // Users without a stored password can still sign in (legacy / Google-only accounts)
     console.log('✅ User found:', user.name, user.role);
     
     // Generate JWT token
@@ -460,6 +467,30 @@ router.get('/debug-users', async (req, res) => {
 router.post('/logout', (req, res) => {
   res.clearCookie('auth_token');
   res.status(200).json({ message: 'Logged out successfully' });
+});
+
+router.post('/change-password', verifyJWT, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!newPassword || String(newPassword).length < 8) {
+      return res.status(400).json({ error: 'New password must be at least 8 characters' });
+    }
+
+    const user = await User.findById(req.user._id).select('+password');
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const { verifyPassword, hashPassword } = require('../utils/password');
+    if (user.password && (!currentPassword || !verifyPassword(currentPassword, user.password))) {
+      return res.status(401).json({ error: 'Current password is incorrect' });
+    }
+
+    user.password = hashPassword(newPassword);
+    await user.save();
+    res.json({ message: 'Password updated successfully' });
+  } catch (err) {
+    console.error('Change password error:', err);
+    res.status(500).json({ error: 'Failed to change password' });
+  }
 });
 
 module.exports = router;

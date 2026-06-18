@@ -167,18 +167,16 @@ const getCandidates = async (req, res) => {
     });
     
     const candidates = await User.find({ role: 'candidate' })
-      .select('name email phone location skills experience createdAt lastActive')
+      .select('name email phone location skills experience createdAt lastActive savedJobs')
+      .populate('savedJobs', 'title companyName createdAt')
       .sort({ createdAt: -1 });
 
     const candidatesWithActivity = await Promise.all(
       candidates.map(async (candidate) => {
-        const [applications, savedJobs] = await Promise.all([
-          Application.find({ candidate: candidate._id })
-            .populate('job', 'title company')
-            .select('status createdAt hrNotes'),
-          // For now, we'll simulate saved jobs since we don't have a SavedJob model
-          Promise.resolve([])
-        ]);
+        const applications = await Application.find({ candidate: candidate._id })
+          .populate('job', 'title companyName location employmentType')
+          .select('status createdAt hrNotes matchScore')
+          .sort({ createdAt: -1 });
 
         const profileCompletion = calculateProfileCompletion(candidate);
 
@@ -192,16 +190,24 @@ const getCandidates = async (req, res) => {
           experience: candidate.experience,
           createdAt: candidate.createdAt,
           lastActive: candidate.lastActive || candidate.createdAt,
-          applications: applications.map(app => ({
+          applications: applications.map((app) => ({
             _id: app._id,
             jobTitle: app.job?.title || 'Unknown Job',
-            companyName: app.job?.company || 'Unknown Company',
+            companyName: app.job?.companyName || 'Unknown Company',
+            location: app.job?.location || null,
+            employmentType: app.job?.employmentType || null,
+            matchScore: app.matchScore ?? null,
             status: app.status,
             appliedAt: app.createdAt,
-            hrNotes: app.hrNotes
+            hrNotes: app.hrNotes,
           })),
-          savedJobs: [], // Will be populated when SavedJob model is implemented
-          profileCompletion
+          savedJobs: (candidate.savedJobs || []).map((job) => ({
+            _id: job._id,
+            title: job.title,
+            company: job.companyName || 'Unknown Company',
+            savedAt: job.createdAt,
+          })),
+          profileCompletion,
         };
       })
     );
@@ -291,67 +297,30 @@ const getHRUsers = async (req, res) => {
   }
 };
 
+const {
+  transformInterviewForAdmin,
+  INTERVIEW_POPULATE,
+} = require('../utils/interviewTransform');
+
 const getInterviews = async (req, res) => {
   try {
     const { status } = req.query;
     console.log('📊 Admin fetching interviews with status:', status);
-    
+
     const Interview = require('../models/Interview');
-    const Application = require('../models/Application');
-    const User = require('../models/User');
-    const Job = require('../models/Job');
-    
-    // Build filter
-    let filter = {};
+
+    const filter = {};
     if (status && status !== 'all') {
       filter.status = status;
     }
-    
-    // Fetch real interviews from database
-    let interviews = [];
-    try {
-      interviews = await Interview.find(filter)
-        .populate({
-          path: 'application',
-          populate: [
-            { path: 'candidate', select: 'name email' },
-            { path: 'job', select: 'title companyName' }
-          ]
-        })
-        .populate('interviewer', 'name email companyName')
-        .sort({ scheduledAt: -1 });
-      
-      console.log(`📊 Found ${interviews.length} interviews in database`);
-    } catch (dbError) {
-      console.error('❌ Database error fetching interviews:', dbError);
-      // Return empty array if database fails
-      interviews = [];
-    }
-    
-    // Transform data for admin interface
-    const transformedInterviews = interviews.map(interview => ({
-      _id: interview._id,
-      candidateId: interview.application?.candidate?._id || 'unknown',
-      candidateName: interview.application?.candidate?.name || 'Unknown Candidate',
-      candidateEmail: interview.application?.candidate?.email || 'Unknown Email',
-      hrId: interview.interviewer?._id || 'unknown',
-      hrName: interview.interviewer?.name || 'Unknown HR',
-      hrCompany: interview.interviewer?.companyName || 'Unknown Company',
-      jobId: interview.application?.job?._id || 'unknown',
-      jobTitle: interview.application?.job?.title || 'Unknown Job',
-      scheduledAt: interview.scheduledAt,
-      completedAt: interview.completedAt,
-      duration: interview.duration,
-      status: interview.status,
-      type: interview.type,
-      notes: interview.notes,
-      feedback: interview.scorecard?.feedback,
-      rating: interview.scorecard?.overall,
-      outcome: interview.scorecard?.recommendation,
-      createdAt: interview.createdAt
-    }));
 
-    console.log(`📊 Returning ${transformedInterviews.length} real interviews from database`);
+    const interviews = await Interview.find(filter)
+      .populate(INTERVIEW_POPULATE)
+      .sort({ scheduledAt: -1 });
+
+    const transformedInterviews = interviews.map(transformInterviewForAdmin);
+
+    console.log(`📊 Returning ${transformedInterviews.length} interviews`);
     res.json(transformedInterviews);
   } catch (err) {
     console.error('❌ Error fetching interviews:', err);
@@ -362,7 +331,7 @@ const getInterviews = async (req, res) => {
 const verifyHR = async (req, res) => {
   try {
     const { userId } = req.params;
-    const { action } = req.body; // 'approve' or 'reject'
+    const { action, notes } = req.body; // 'approve' or 'reject'
 
     console.log(`📊 ${action === 'approve' ? 'Approving' : 'Rejecting'} HR verification for user:`, userId);
 
@@ -373,15 +342,38 @@ const verifyHR = async (req, res) => {
 
     if (action === 'approve') {
       user.isVerified = true;
-      user.verificationStatus = 'approved';
-      user.verifiedAt = new Date();
+      if (notes) user.verificationNotes = notes;
     } else if (action === 'reject') {
       user.isVerified = false;
-      user.verificationStatus = 'rejected';
-      user.rejectedAt = new Date();
+      if (notes) user.verificationNotes = notes;
+    } else {
+      return res.status(400).json({ error: 'Invalid action. Use approve or reject.' });
     }
 
     await user.save();
+
+    if (action === 'approve') {
+      try {
+        const { createNotification } = require('../services/notificationService');
+        const { sendEmail } = require('../utils/email');
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+        await createNotification(
+          user._id,
+          'hr_verified',
+          'HR Account Verified',
+          'Your HR account has been verified. You now have full access to HR features.',
+          { type: 'user', id: user._id },
+          '/hr/dashboard'
+        );
+        await sendEmail({
+          to: user.email,
+          subject: 'Your HR account has been verified — Talora HR',
+          html: `<p>Hi ${user.name},</p><p>Your HR account has been approved.</p><p><a href="${frontendUrl}/hr/dashboard">Go to HR Dashboard</a></p>`,
+        });
+      } catch (notifyErr) {
+        console.error('HR verify notification/email failed:', notifyErr.message);
+      }
+    }
 
     console.log(`✅ HR verification ${action}d successfully for:`, user.email);
     res.json({ 
@@ -391,7 +383,7 @@ const verifyHR = async (req, res) => {
         name: user.name,
         email: user.email,
         isVerified: user.isVerified,
-        verificationStatus: user.verificationStatus
+        verificationNotes: user.verificationNotes
       }
     });
   } catch (err) {

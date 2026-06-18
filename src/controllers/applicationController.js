@@ -1,6 +1,6 @@
 const Application = require('../models/Application');
 const fs = require('fs');
-const  email  = require('../utils/email');
+const { sendEmail } = require('../utils/email');
 const agent = require('../controllers/agentController'); // or correct path
 exports.submitApplication = async (req, res) => {
     try {
@@ -90,8 +90,13 @@ exports.updateApplicationStatus = async (req, res) => {
     try {
       const { id } = req.params;
       const { status } = req.body;
+
+      const allowedStatuses = ['pending', 'reviewed', 'shortlisted', 'hire_recommended', 'hired', 'rejected'];
+      if (!status || !allowedStatuses.includes(status)) {
+        return res.status(400).json({ error: 'Invalid status value' });
+      }
   
-      const application = await Application.findById(id).populate('job');
+      const application = await Application.findById(id).populate('job', 'title companyName');
       if (!application) {
         return res.status(404).json({ error: 'Application not found' });
       }
@@ -99,42 +104,25 @@ exports.updateApplicationStatus = async (req, res) => {
       application.status = status;
       await application.save();
   
-      // Optional: Send email notification to candidate
-      if (application.email && status) {
-        await sendEmail({
-          to: application.email,
-          subject: `Your application for ${application.job.title} is now ${status}`,
-          html: `<p>Hello ${application.name},</p>
-                 <p>Your application status for <strong>${application.job.title}</strong> has been updated to <b>${status}</b>.</p>
-                 <p>Thanks for applying!</p>`
-        });
+      if (application.email) {
+        try {
+          const jobTitle = application.job?.title || 'the position';
+          await sendEmail({
+            to: application.email,
+            subject: `Your application for ${jobTitle} is now ${status}`,
+            html: `<p>Hello ${application.name || 'Candidate'},</p>
+                   <p>Your application status for <strong>${jobTitle}</strong> has been updated to <b>${status}</b>.</p>
+                   <p>Thanks for applying!</p>`
+          });
+        } catch (emailError) {
+          console.error('Failed to send status notification email:', emailError.message);
+        }
       }
   
       res.json({ message: 'Status updated successfully', application });
     } catch (error) {
       console.error('Error updating status:', error);
       res.status(500).json({ error: 'Internal server error' });
-    }
-  };
-  exports.updateStatus = async (req, res) => {
-    try {
-      const application = await Application.findById(req.params.id);
-      if (!application) {
-        return res.status(404).json({ error: "Application not found" });
-      }
-  
-      const { status } = req.body;
-      if (!status) {
-        return res.status(400).json({ error: "Status is required" });
-      }
-  
-      application.status = status;
-      await application.save();
-  
-      res.json({ success: true, application });
-    } catch (err) {
-      console.error("🔥 Error updating status:", err);
-      res.status(500).json({ error: "Server error while updating status" });
     }
   };
 

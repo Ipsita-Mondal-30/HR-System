@@ -7,7 +7,9 @@ const {
   getAllEmployees,
   createEmployee,
   updateEmployee,
-  getEmployeeStats
+  getEmployeeStats,
+  getEmployeeById,
+  getEmployeeProjects,
 } = require('../controllers/employeeController');
 const {
   getAllPayrolls,
@@ -30,6 +32,12 @@ const Job = require('../models/Job');
 const Application = require('../models/Application');
 const Department = require('../models/Department');
 const Role = require('../models/Role');
+const Interview = require('../models/Interview');
+const { sendEmail } = require('../utils/email');
+const { hashPassword, generateTemporaryPassword } = require('../utils/password');
+const { createNotification } = require('../services/notificationService');
+
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
 // Dashboard stats
 router.get('/stats', verifyJWT, isHRorAdmin, getAdminStats);
@@ -41,8 +49,59 @@ router.get('/hr-users', verifyJWT, isHRorAdmin, adminController.getHRUsers);
 router.get('/interviews', verifyJWT, isHRorAdmin, adminController.getInterviews);
 router.put('/users/:userId/verify-hr', verifyJWT, isHRorAdmin, adminController.verifyHR);
 
+const {
+  getHireRecommendations,
+  approveHireAndCreateEmployee,
+  rejectHireRecommendation,
+} = require('../services/hireApprovalService');
+
+router.get('/hire-approvals', verifyJWT, isAdmin, async (req, res) => {
+  try {
+    const recommendations = await getHireRecommendations();
+    res.json(recommendations);
+  } catch (err) {
+    console.error('Error fetching hire approvals:', err);
+    res.status(500).json({ error: 'Failed to fetch hire recommendations' });
+  }
+});
+
+router.post('/hire-approvals/:interviewId/approve', verifyJWT, isAdmin, async (req, res) => {
+  try {
+    const { position, salary, departmentId, adminNotes } = req.body;
+    const result = await approveHireAndCreateEmployee({
+      interviewId: req.params.interviewId,
+      adminUserId: req.user._id,
+      adminNotes,
+      position,
+      salary,
+      departmentId,
+    });
+    res.json({
+      message: 'Hire approved. Employee account created and credentials emailed.',
+      ...result,
+    });
+  } catch (err) {
+    console.error('Hire approval failed:', err);
+    res.status(400).json({ error: err.message || 'Failed to approve hire' });
+  }
+});
+
+router.post('/hire-approvals/:interviewId/reject', verifyJWT, isAdmin, async (req, res) => {
+  try {
+    const interview = await rejectHireRecommendation({
+      interviewId: req.params.interviewId,
+      adminUserId: req.user._id,
+      adminNotes: req.body.adminNotes,
+    });
+    res.json({ message: 'Hire recommendation rejected', interview });
+  } catch (err) {
+    console.error('Hire rejection failed:', err);
+    res.status(400).json({ error: err.message || 'Failed to reject hire' });
+  }
+});
+
 // Job approval endpoints
-router.put('/jobs/:jobId/approve', verifyJWT, isHRorAdmin, async (req, res) => {
+router.put('/jobs/:jobId/approve', verifyJWT, isAdmin, async (req, res) => {
   try {
     const { jobId } = req.params;
     const { action, reason } = req.body; // 'approve' or 'reject'
@@ -57,6 +116,27 @@ router.put('/jobs/:jobId/approve', verifyJWT, isHRorAdmin, async (req, res) => {
     if (action === 'approve') {
       job.status = 'active';
       job.isApproved = true;
+
+      try {
+        const User = require('../models/User');
+        const notificationService = require('../services/notificationService');
+        const candidates = await User.find({
+          role: 'candidate',
+          emailNotifications: { $ne: false },
+        }).select('_id');
+
+        for (const candidate of candidates) {
+          await notificationService.notifyNewJobPosted(
+            candidate._id,
+            job._id,
+            job.title,
+            job.companyName || 'Company'
+          );
+        }
+        console.log(`📢 Notified ${candidates.length} candidates about approved job`);
+      } catch (notifError) {
+        console.error('Failed to notify candidates about approved job:', notifError);
+      }
     } else if (action === 'reject') {
       job.status = 'rejected';
       job.isApproved = false;
@@ -82,11 +162,12 @@ router.put('/jobs/:jobId/approve', verifyJWT, isHRorAdmin, async (req, res) => {
   }
 });
 
-router.get('/jobs/pending', verifyJWT, isHRorAdmin, async (req, res) => {
+router.get('/jobs/pending', verifyJWT, isAdmin, async (req, res) => {
   try {
     const pendingJobs = await Job.find({ status: 'pending' })
       .populate('createdBy', 'name email companyName')
       .populate('department', 'name')
+      .populate('role', 'title')
       .sort({ createdAt: -1 });
 
     console.log(`📊 Found ${pendingJobs.length} pending job approvals`);
@@ -158,48 +239,139 @@ router.put('/users/:userId/status', verifyJWT, isHRorAdmin, async (req, res) => 
     }
 });
 
-// Reset user password
+// Reset user password — generates a temporary password and emails the user
 router.post('/users/:userId/reset-password', verifyJWT, isHRorAdmin, async (req, res) => {
     try {
         const { userId } = req.params;
-        const user = await User.findById(userId);
+        const user = await User.findById(userId).select('+password');
 
         if (!user) {
             return res.status(404).json({ error: 'User not found' });
         }
 
-        // In a real app, you'd generate a reset token and send email
-        // For now, just return success
-        res.json({ message: 'Password reset email sent' });
+        const temporaryPassword = generateTemporaryPassword();
+        user.password = hashPassword(temporaryPassword);
+        await user.save();
+
+        const loginUrl = `${FRONTEND_URL}/login`;
+        let emailSent = false;
+        try {
+            await sendEmail({
+                to: user.email,
+                subject: 'Your password has been reset — Talora HR',
+                html: `
+                  <p>Hi ${user.name},</p>
+                  <p>An administrator reset your account password.</p>
+                  <p><strong>Temporary password:</strong> ${temporaryPassword}</p>
+                  <p>Sign in at <a href="${loginUrl}">${loginUrl}</a> using your email and this password.</p>
+                  <p>You can also continue using Google sign-in if your account is linked.</p>
+                  <p>Please change your password after logging in.</p>
+                `,
+            });
+            emailSent = true;
+        } catch (emailErr) {
+            console.error('Password reset email failed:', emailErr.message);
+        }
+
+        try {
+            await createNotification(
+                user._id,
+                'password_reset',
+                'Password Reset',
+                'Your account password was reset by an administrator.',
+                { type: 'user', id: user._id },
+                '/login'
+            );
+        } catch (_) { /* non-critical */ }
+
+        res.json({
+            message: emailSent
+                ? 'Password reset email sent successfully'
+                : 'Password reset. Email could not be sent — share the temporary password with the user manually.',
+            emailSent,
+            ...(emailSent ? {} : { temporaryPassword }),
+        });
     } catch (err) {
         console.error('Error resetting password:', err);
         res.status(500).json({ error: 'Failed to reset password' });
     }
 });
 
-// Verify HR user
+// Verify HR user (quick approve from user management table)
 router.put('/users/:userId/verify', verifyJWT, isHRorAdmin, async (req, res) => {
     try {
         const { userId } = req.params;
-        const { approved, notes } = req.body;
+        const approved = req.body?.approved !== false;
+        const notes = req.body?.notes;
 
-        const user = await User.findByIdAndUpdate(
-            userId,
-            {
-                isVerified: approved,
-                verificationNotes: notes
-            },
-            { new: true }
-        ).select('-password');
-
+        const user = await User.findById(userId);
         if (!user) {
             return res.status(404).json({ error: 'User not found' });
         }
+        if (user.role !== 'hr') {
+            return res.status(400).json({ error: 'Only HR accounts can be verified' });
+        }
 
-        res.json(user);
+        user.isVerified = approved;
+        if (notes) user.verificationNotes = notes;
+        await user.save();
+
+        if (approved) {
+            try {
+                await createNotification(
+                    user._id,
+                    'hr_verified',
+                    'HR Account Verified',
+                    'Your HR account has been verified. You now have full access to HR features.',
+                    { type: 'user', id: user._id },
+                    '/hr/dashboard'
+                );
+                await sendEmail({
+                    to: user.email,
+                    subject: 'Your HR account has been verified — Talora HR',
+                    html: `
+                      <p>Hi ${user.name},</p>
+                      <p>Your HR account on Talora has been verified by an administrator.</p>
+                      <p>You can now access all HR features at <a href="${FRONTEND_URL}/hr/dashboard">${FRONTEND_URL}/hr/dashboard</a>.</p>
+                    `,
+                });
+            } catch (notifyErr) {
+                console.error('HR verify notification/email failed:', notifyErr.message);
+            }
+        }
+
+        const safeUser = await User.findById(userId).select('-password');
+        res.json(safeUser);
     } catch (err) {
         console.error('Error verifying user:', err);
         res.status(500).json({ error: 'Failed to verify user' });
+    }
+});
+
+// Send HR verification reminder email
+router.post('/users/:userId/send-verification-email', verifyJWT, isHRorAdmin, async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const user = await User.findById(userId);
+
+        if (!user || user.role !== 'hr') {
+            return res.status(404).json({ error: 'HR user not found' });
+        }
+
+        await sendEmail({
+            to: user.email,
+            subject: 'HR account verification — Talora HR',
+            html: `
+              <p>Hi ${user.name},</p>
+              <p>Your HR account is pending administrator verification.</p>
+              <p>An admin will review your account shortly. No action is required from you right now.</p>
+            `,
+        });
+
+        res.json({ message: 'Verification email sent successfully' });
+    } catch (err) {
+        console.error('Error sending verification email:', err);
+        res.status(500).json({ error: err.message || 'Failed to send verification email' });
     }
 });
 
@@ -738,8 +910,9 @@ router.post('/roles', verifyJWT, isHRorAdmin, async (req, res) => {
             departmentId: departmentId || null
         });
 
+        const populatedRole = await Role.findById(role._id).populate('departmentId', 'name');
         console.log(`✅ Created role: ${role.title}`);
-        res.status(201).json(role);
+        res.status(201).json(populatedRole);
     } catch (err) {
         console.error('Error creating role:', err);
         res.status(500).json({ error: 'Failed to create role' });
@@ -812,51 +985,7 @@ router.get('/job-categories', verifyJWT, isHRorAdmin, async (req, res) => {
     }
 });
 
-// Interview Management Routes
-router.get('/interviews', verifyJWT, isHRorAdmin, async (req, res) => {
-    try {
-        const Interview = require('../models/Interview');
-        
-        const interviews = await Interview.find()
-            .populate({
-                path: 'application',
-                populate: [
-                    { path: 'candidate', select: 'name email' },
-                    { path: 'job', select: 'title companyName' }
-                ]
-            })
-            .populate('interviewer', 'name email')
-            .sort({ scheduledAt: -1 });
-
-        // Transform data for admin view
-        const transformedInterviews = interviews.map(interview => ({
-            _id: interview._id,
-            candidateId: interview.application?.candidate?._id,
-            candidateName: interview.application?.candidate?.name || 'Unknown',
-            candidateEmail: interview.application?.candidate?.email || 'Unknown',
-            hrId: interview.interviewer?._id,
-            hrName: interview.interviewer?.name || 'Unknown',
-            hrCompany: interview.application?.job?.companyName || 'Unknown',
-            jobId: interview.application?.job?._id,
-            jobTitle: interview.application?.job?.title || 'Unknown',
-            scheduledAt: interview.scheduledAt,
-            duration: interview.duration || 60,
-            status: interview.status,
-            type: interview.type || 'video',
-            notes: interview.notes,
-            feedback: interview.feedback,
-            rating: interview.rating,
-            outcome: interview.outcome,
-            createdAt: interview.createdAt
-        }));
-
-        console.log(`📊 Found ${transformedInterviews.length} interviews for admin`);
-        res.json(transformedInterviews);
-    } catch (err) {
-        console.error('Error fetching admin interviews:', err);
-        res.status(500).json({ error: 'Failed to fetch interviews' });
-    }
-});
+// Interview Management Routes — handled by adminController.getInterviews above
 
 // Employee Management Routes
 router.get('/employees', verifyJWT, isHRorAdmin, getAllEmployees);
@@ -911,65 +1040,9 @@ router.get('/employees/top-performers', verifyJWT, isHRorAdmin, async (req, res)
     res.status(500).json({ error: 'Failed to fetch top performers' });
   }
 });
-router.get('/employees/:id', verifyJWT, isHRorAdmin, async (req, res) => {
-  try {
-    const Employee = require('../models/Employee');
-    const { syncEmployeePerformanceFromProjects } = require('../services/projectPerformanceService');
-    const employee = await Employee.findById(req.params.id)
-      .populate('user', 'name email')
-      .populate('department', 'name')
-      .populate('manager', 'user position')
-      .populate({
-        path: 'manager',
-        populate: {
-          path: 'user',
-          select: 'name'
-        }
-      });
-
-    if (!employee) {
-      return res.status(404).json({ message: 'Employee not found' });
-    }
-
-    // Add stats
-    const Project = require('../models/Project');
-    const OKR = require('../models/OKR');
-    const Feedback = require('../models/Feedback');
-
-    const [projectsCount, okrsCount, feedbackCount] = await Promise.all([
-      Project.countDocuments({ 'teamMembers.employee': employee._id }),
-      OKR.countDocuments({ employee: employee._id }),
-      Feedback.countDocuments({ employee: employee._id })
-    ]);
-
-    const feedbacks = await Feedback.find({ employee: employee._id });
-    const avgRating = feedbacks.length > 0 
-      ? feedbacks.reduce((sum, f) => sum + (f.overallRating || 0), 0) / feedbacks.length 
-      : 0;
-
-    await syncEmployeePerformanceFromProjects(employee._id);
-    const refreshed = await Employee.findById(employee._id)
-      .populate('user', 'name email')
-      .populate('department', 'name')
-      .populate({ path: 'manager', select: 'position', populate: { path: 'user', select: 'name' } });
-
-    const employeeWithStats = {
-      ...refreshed.toObject(),
-      resume: refreshed.resume,
-      stats: {
-        projectsCount,
-        okrsCount,
-        feedbackCount,
-        avgRating
-      }
-    };
-
-    res.json(employeeWithStats);
-  } catch (error) {
-    console.error('Error fetching employee:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
-  }
-});
+router.get('/employees/stats', verifyJWT, isHRorAdmin, getEmployeeStats);
+router.get('/employees/:id/projects', verifyJWT, isHRorAdmin, getEmployeeProjects);
+router.get('/employees/:id', verifyJWT, isHRorAdmin, getEmployeeById);
 
 // Test route (no auth required)
 router.get('/test-employees', async (req, res) => {
@@ -995,84 +1068,17 @@ router.get('/test-employees', async (req, res) => {
 });
 router.post('/employees', verifyJWT, isHRorAdmin, createEmployee);
 router.put('/employees/:id', verifyJWT, isHRorAdmin, updateEmployee);
-router.get('/employees/stats', verifyJWT, isHRorAdmin, getEmployeeStats);
-router.get('/employees/:id/projects', verifyJWT, isHRorAdmin, async (req, res) => {
-  try {
-    const Project = require('../models/Project');
-    const projects = await Project.find({
-      'teamMembers.employee': req.params.id
-    }).populate('projectManager', 'user position');
-    
-    const projectsWithDetails = projects.map(project => {
-      const teamMember = project.teamMembers.find(
-        member => member.employee.toString() === req.params.id
-      );
-      
-      return {
-        _id: project._id,
-        name: project.name,
-        status: project.status,
-        completionPercentage: project.completionPercentage,
-        role: teamMember?.role || 'team-member',
-        contributionPercentage: teamMember?.contributionPercentage || 0,
-        hoursWorked: teamMember?.hoursWorked || 0
-      };
-    });
-    
-    res.json({ projects: projectsWithDetails });
-  } catch (error) {
-    console.error('Error fetching employee projects:', error);
-    res.status(500).json({ error: 'Failed to fetch employee projects' });
-  }
-});
 
 router.post('/employees/:id/ai-insights', verifyJWT, isHRorAdmin, async (req, res) => {
   try {
-    const Employee = require('../models/Employee');
-    const Project = require('../models/Project');
-    const Feedback = require('../models/Feedback');
-    const OKR = require('../models/OKR');
-    
-    const employee = await Employee.findById(req.params.id)
-      .populate('user', 'name')
-      .populate('department', 'name');
-    
-    if (!employee) {
-      return res.status(404).json({ error: 'Employee not found' });
-    }
-    
-    // Generate basic AI insights (simplified version)
-    const insights = {
-      promotionReadiness: {
-        score: Math.min(employee.performanceScore + 10, 100),
-        reasons: ['Strong performance metrics', 'Consistent project delivery'],
-        lastUpdated: new Date()
-      },
-      attritionRisk: {
-        score: Math.max(100 - employee.performanceScore - 20, 0),
-        factors: ['Performance tracking needed', 'Engagement monitoring required'],
-        lastUpdated: new Date()
-      },
-      strengths: ['Technical skills', 'Project execution', 'Team collaboration'],
-      improvementAreas: ['Communication', 'Leadership development', 'Time management'],
-      lastAnalyzed: new Date()
-    };
-    
-    // Update employee record
-    employee.aiInsights = insights;
-    await employee.save();
-    
-    res.json({
-      employee: {
-        id: employee._id,
-        name: employee.user.name,
-        position: employee.position
-      },
-      insights: employee.aiInsights
-    });
+    const { generateEmployeeAIInsights } = require('../services/employeeAIService');
+    const result = await generateEmployeeAIInsights(req.params.id);
+    res.json(result);
   } catch (error) {
     console.error('Error generating AI insights:', error);
-    res.status(500).json({ error: 'Failed to generate AI insights' });
+    res.status(error.message === 'Employee not found' ? 404 : 500).json({
+      error: error.message === 'Employee not found' ? error.message : 'Failed to generate AI insights',
+    });
   }
 });
 

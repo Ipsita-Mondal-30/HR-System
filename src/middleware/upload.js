@@ -10,7 +10,7 @@ cloudinary.config({
 });
 
 const ALLOWED_RESUME_EXTENSIONS = new Set(['.pdf', '.doc', '.docx']);
-const MAX_RESUME_SIZE_BYTES = 5 * 1024 * 1024;
+const MAX_RESUME_SIZE_BYTES = 10 * 1024 * 1024;
 
 const storage = new CloudinaryStorage({
   cloudinary,

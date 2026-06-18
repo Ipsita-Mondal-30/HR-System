@@ -1,9 +1,14 @@
 const express = require('express');
 const router = express.Router();
-const { verifyJWT, isHRorAdmin } = require('../middleware/auth');
+const { verifyJWT, isHRorAdmin, isAdmin } = require('../middleware/auth');
 const Interview = require('../models/Interview');
 const Application = require('../models/Application');
 const { sendEmail } = require('../utils/email');
+const interviewRecordingUpload = require('../middleware/interviewRecordingUpload');
+const { uploadVideoBuffer } = require('../utils/cloudinaryUpload');
+const {
+  notifyAdminsHireRecommended,
+} = require('../services/hireApprovalService');
 
 // Get all interviews
 router.get('/', verifyJWT, isHRorAdmin, async (req, res) => {
@@ -230,44 +235,144 @@ router.put('/:id/status', verifyJWT, isHRorAdmin, async (req, res) => {
   }
 });
 
+// Upload or link interview meeting recording (required before scorecard)
+router.post('/:id/recording', verifyJWT, isHRorAdmin, (req, res, next) => {
+  interviewRecordingUpload.single('recording')(req, res, (err) => {
+    if (err) {
+      return res.status(400).json({ error: err.message || 'Upload failed' });
+    }
+    next();
+  });
+}, async (req, res) => {
+  try {
+    const interview = await Interview.findById(req.params.id);
+    if (!interview) return res.status(404).json({ error: 'Interview not found' });
+
+    const { recordingUrl, recordingLink } = req.body;
+    let url = recordingLink || recordingUrl || '';
+
+    if (req.file?.buffer) {
+      url = await uploadVideoBuffer(
+        req.file.buffer,
+        'interview-recordings',
+        req.file.originalname,
+        req.file.mimetype
+      );
+    }
+
+    if (!url?.trim()) {
+      return res.status(400).json({
+        error: 'Upload a recording file or paste a meeting recording link (Zoom/Meet/Teams)',
+      });
+    }
+
+    interview.recording = {
+      url: url.trim(),
+      type: req.file ? 'upload' : 'link',
+      fileName: req.file?.originalname || 'Meeting recording link',
+      uploadedAt: new Date(),
+      uploadedBy: req.user._id,
+    };
+    if (interview.status === 'scheduled') {
+      interview.status = 'completed';
+      interview.completedAt = new Date();
+    }
+    await interview.save();
+
+    const populated = await Interview.findById(interview._id).populate([
+      {
+        path: 'application',
+        populate: [
+          { path: 'job', select: 'title companyName' },
+          { path: 'candidate', select: 'name email' },
+        ],
+      },
+      { path: 'interviewer', select: 'name email' },
+    ]);
+
+    res.json({ message: 'Interview recording saved', interview: populated });
+  } catch (err) {
+    console.error('Error saving interview recording:', err);
+    res.status(500).json({ error: err.message || 'Failed to save recording' });
+  }
+});
+
 // Submit interview scorecard
 router.put('/:id/scorecard', verifyJWT, isHRorAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { scorecard } = req.body;
 
+    const existing = await Interview.findById(id);
+    if (!existing) {
+      return res.status(404).json({ error: 'Interview not found' });
+    }
+
+    if (!existing.recording?.url) {
+      return res.status(400).json({
+        error: 'Upload the online meeting recording before submitting a scorecard. Use "Upload Recording" on the interview card.',
+      });
+    }
+
     const interview = await Interview.findByIdAndUpdate(
       id,
-      { 
+      {
         scorecard,
-        status: 'completed' // Automatically mark as completed when scorecard is submitted
+        status: 'completed',
+        completedAt: existing.completedAt || new Date(),
       },
       { new: true }
     ).populate([
       {
         path: 'application',
         populate: [
-          { path: 'job', select: 'title companyName' },
-          { path: 'candidate', select: 'name email' }
-        ]
+          { path: 'job', select: 'title companyName department' },
+          { path: 'candidate', select: 'name email' },
+        ],
       },
-      { path: 'interviewer', select: 'name email' }
+      { path: 'interviewer', select: 'name email' },
     ]);
 
     if (!interview) {
       return res.status(404).json({ error: 'Interview not found' });
     }
 
-    // Update application status based on recommendation
     if (scorecard.recommendation === 'hire') {
+      interview.hireApproval = {
+        status: 'pending',
+        recommendedAt: new Date(),
+      };
+      await interview.save();
+
       await Application.findByIdAndUpdate(interview.application._id, {
-        status: 'shortlisted'
+        status: 'hire_recommended',
+        hireRecommendedAt: new Date(),
       });
+
+      await notifyAdminsHireRecommended(interview, interview.application);
     } else if (scorecard.recommendation === 'no-hire') {
       await Application.findByIdAndUpdate(interview.application._id, {
-        status: 'rejected'
+        status: 'rejected',
+      });
+      interview.hireApproval = { status: 'none' };
+      await interview.save();
+    } else {
+      await Application.findByIdAndUpdate(interview.application._id, {
+        status: 'shortlisted',
       });
     }
+
+    // Re-fetch after hireApproval update
+    const finalInterview = await Interview.findById(id).populate([
+      {
+        path: 'application',
+        populate: [
+          { path: 'job', select: 'title companyName' },
+          { path: 'candidate', select: 'name email' },
+        ],
+      },
+      { path: 'interviewer', select: 'name email' },
+    ]);
 
     // Generate AI-powered email notifications
     try {
@@ -405,8 +510,10 @@ router.put('/:id/scorecard', verifyJWT, isHRorAdmin, async (req, res) => {
     }
 
     res.json({
-      message: 'Scorecard submitted successfully',
-      interview
+      message: scorecard.recommendation === 'hire'
+        ? 'Scorecard submitted. Hire recommendation sent to admin for approval.'
+        : 'Scorecard submitted successfully',
+      interview: finalInterview,
     });
   } catch (err) {
     console.error('Error submitting scorecard:', err);

@@ -199,9 +199,121 @@ const getEmployeeStats = async (req, res) => {
   }
 };
 
+function employeeRefId(employee) {
+  if (!employee) return null;
+  return typeof employee === 'object' && employee._id
+    ? employee._id.toString()
+    : employee.toString();
+}
+
+const getEmployeeById = async (req, res) => {
+  try {
+    const { syncEmployeePerformanceFromProjects } = require('../services/projectPerformanceService');
+    const employee = await Employee.findById(req.params.id)
+      .populate('user', 'name email phone')
+      .populate('department', 'name')
+      .populate({
+        path: 'manager',
+        select: 'position',
+        populate: { path: 'user', select: 'name email' },
+      });
+
+    if (!employee) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+
+    const [projectsCount, okrsCount, feedbackCount] = await Promise.all([
+      Project.countDocuments({
+        $or: [
+          { 'teamMembers.employee': employee._id },
+          { projectManager: employee._id },
+        ],
+      }),
+      OKR.countDocuments({ employee: employee._id }),
+      Feedback.countDocuments({ employee: employee._id }),
+    ]);
+
+    const feedbacks = await Feedback.find({ employee: employee._id });
+    const avgRating =
+      feedbacks.length > 0
+        ? feedbacks.reduce((sum, f) => sum + (f.overallRating || 0), 0) / feedbacks.length
+        : 0;
+
+    await syncEmployeePerformanceFromProjects(employee._id);
+    const refreshed = await Employee.findById(employee._id)
+      .populate('user', 'name email phone')
+      .populate('department', 'name')
+      .populate({
+        path: 'manager',
+        select: 'position',
+        populate: { path: 'user', select: 'name email' },
+      });
+
+    res.json({
+      ...refreshed.toObject(),
+      resume: refreshed.resume,
+      stats: {
+        projectsCount,
+        okrsCount,
+        feedbackCount,
+        avgRating,
+      },
+    });
+  } catch (error) {
+    console.error('❌ Error fetching employee:', error);
+    res.status(500).json({ error: 'Failed to fetch employee' });
+  }
+};
+
+const getEmployeeProjects = async (req, res) => {
+  try {
+    const employeeId = req.params.id;
+    const employee = await Employee.findById(employeeId).select('_id');
+    if (!employee) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+
+    const projects = await Project.find({
+      $or: [
+        { 'teamMembers.employee': employeeId },
+        { projectManager: employeeId },
+      ],
+    }).sort({ endDate: -1, startDate: -1 });
+
+    const projectsWithDetails = projects.map((project) => {
+      const isPm = employeeRefId(project.projectManager) === employeeId;
+      const teamMember = project.teamMembers.find(
+        (member) => employeeRefId(member.employee) === employeeId
+      );
+
+      return {
+        _id: project._id,
+        name: project.name,
+        description: project.description,
+        status: project.status,
+        priority: project.priority,
+        completionPercentage: project.completionPercentage ?? 0,
+        startDate: project.startDate,
+        endDate: project.endDate,
+        role: isPm ? 'project-manager' : teamMember?.role || 'team-member',
+        contributionPercentage: teamMember?.contributionPercentage ?? (isPm ? 100 : 0),
+        hoursWorked: teamMember?.hoursWorked ?? 0,
+        isProjectManager: isPm,
+      };
+    });
+
+    res.json({ projects: projectsWithDetails });
+  } catch (error) {
+    console.error('❌ Error fetching employee projects:', error);
+    res.status(500).json({ error: 'Failed to fetch employee projects' });
+  }
+};
+
 module.exports = {
   getAllEmployees,
   createEmployee,
   updateEmployee,
-  getEmployeeStats
+  getEmployeeStats,
+  getEmployeeById,
+  getEmployeeProjects,
 };

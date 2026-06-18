@@ -192,6 +192,8 @@ app.use('/api/okrs', require('./routes/okrRoutes'));
 app.use('/api/achievements', require('./routes/achievementRoutes'));
 app.use('/api/admin/achievements', require('./routes/achievementRoutes'));
 app.use('/api/notifications', require('./routes/notificationRoutes'));
+app.use('/api/resume-analysis', require('./routes/resumeAnalysisRoutes'));
+app.use('/api/hiring', require('./routes/hiringRoutes'));
 app.use('/api/application-drafts', require('./routes/applicationDraftRoutes'));
 
 // Debug users endpoint

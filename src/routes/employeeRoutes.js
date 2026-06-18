@@ -16,7 +16,7 @@ const Achievement = require('../models/Achievement');
 const User = require('../models/User');
 const SupportTicket = require('../models/SupportTicket');
 const FeedbackRequest = require('../models/FeedbackRequest');
-const { CohereClient } = require('cohere-ai');
+const { generateEmployeeAIInsights } = require('../services/employeeAIService');
 const { downloadEmployeePayslip } = require('../controllers/payrollController');
 
 
@@ -145,189 +145,6 @@ router.get('/:id', verifyJWT, async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch employee' });
   }
 });
-
-// Initialize Cohere client
-const cohere = new CohereClient({
-  token: process.env.COHERE_API_KEY,
-});
-
-// Helper function for AI analysis
-async function generateAIInsights(employee, projects = [], feedback = [], okrs = []) {
-  // Default values for missing data
-  const employeeName = employee?.user?.name || 'Unknown Employee';
-  const position = employee?.position || 'Unspecified Position';
-  const department = employee?.department?.name || 'Unassigned Department';
-  const performanceScore = employee?.performanceScore || 0;
-  const projectContribution = employee?.projectContribution || 0;
-  
-  try {
-    console.log(`🤖 Generating AI insights for ${employeeName}`);
-    
-    // Prepare project data with fallbacks
-    const projectSummary = projects.length > 0 
-      ? projects.map(p => `- ${p.name || 'Unnamed Project'}: ${p.status || 'No status'}`).join('\n')
-      : 'No recent projects';
-    
-    // Prepare feedback data with fallbacks
-    const feedbackSummary = feedback.length > 0
-      ? feedback.map(f => `- ${f.type || 'General'}: ${f.overallRating || 'N/A'}/5 - ${f.summary || 'No summary'}`).join('\n')
-      : 'No recent feedback';
-    
-    // Prepare OKR data with fallbacks
-    const okrSummary = okrs.length > 0
-      ? okrs.map(o => `- ${o.objective || 'Unnamed Objective'}: ${o.overallProgress || 0}%`).join('\n')
-      : 'No active OKRs';
-    
-    const prompt = `
-    Analyze this employee's performance data and provide insights:
-    
-    Employee: ${employeeName}
-    Position: ${position}
-    Department: ${department}
-    
-    Recent Projects (${projects.length}):
-    ${projectSummary}
-    
-    Performance Metrics:
-    - Performance Score: ${performanceScore}%
-    - Project Contribution: ${projectContribution}%
-    
-    Recent Feedback:
-    ${feedbackSummary}
-    
-    Current OKRs:
-    ${okrSummary}
-    
-    Please provide a JSON response with the following structure:
-    {
-      "promotionReadiness": {
-        "score": 0-100,
-        "reasons": ["reason1", "reason2"],
-        "nextSteps": ["action1", "action2"]
-      },
-      "attritionRisk": {
-        "score": 0-100,
-        "factors": ["factor1", "factor2"],
-        "mitigation": ["action1", "action2"]
-      },
-      "strengths": ["strength1", "strength2", "strength3"],
-      "improvementAreas": ["area1", "area2", "area3"],
-      "recommendations": ["recommendation1", "recommendation2"]
-    }
-    `;
-
-    console.log('📝 Sending prompt to AI model...');
-    const response = await cohere.generate({
-      model: 'command',
-      prompt: prompt,
-      maxTokens: 1000,
-      temperature: 0.5,
-      k: 0,
-      p: 0.9,
-      frequencyPenalty: 0.5,
-      presencePenalty: 0.5,
-      stopSequences: ['---'],
-      returnLikelihoods: 'NONE'
-    });
-
-    console.log('✅ Received AI response, processing...');
-    
-    try {
-      // Extract JSON from the response
-      const jsonMatch = response.generations[0].text.match(/\{[\s\S]*\}/);
-      const jsonString = jsonMatch ? jsonMatch[0] : response.generations[0].text;
-      const insights = JSON.parse(jsonString);
-      
-      // Validate and format the response
-      return {
-        promotionReadiness: {
-          score: Math.min(Math.max(insights.promotionReadiness?.score || 50, 0), 100),
-          reasons: Array.isArray(insights.promotionReadiness?.reasons) 
-            ? insights.promotionReadiness.reasons 
-            : ['Not enough data for assessment'],
-          nextSteps: Array.isArray(insights.promotionReadiness?.nextSteps)
-            ? insights.promotionReadiness.nextSteps
-            : []
-        },
-        attritionRisk: {
-          score: Math.min(Math.max(insights.attritionRisk?.score || 30, 0), 100),
-          factors: Array.isArray(insights.attritionRisk?.factors)
-            ? insights.attritionRisk.factors
-            : ['Insufficient data for assessment'],
-          mitigation: Array.isArray(insights.attritionRisk?.mitigation)
-            ? insights.attritionRisk.mitigation
-            : []
-        },
-        strengths: Array.isArray(insights.strengths) && insights.strengths.length > 0
-          ? insights.strengths.slice(0, 3)
-          : ['Team collaboration', 'Adaptability', 'Willingness to learn'],
-        improvementAreas: Array.isArray(insights.improvementAreas) && insights.improvementAreas.length > 0
-          ? insights.improvementAreas.slice(0, 3)
-          : ['Skill development', 'Time management', 'Communication'],
-        recommendations: Array.isArray(insights.recommendations) && insights.recommendations.length > 0
-          ? insights.recommendations
-          : [
-              'Schedule regular 1:1 meetings to discuss career development',
-              'Consider additional training in key skill areas'
-            ]
-      };
-      
-    } catch (parseError) {
-      console.error('⚠️ Error parsing AI response, using fallback insights:', parseError);
-      return getFallbackInsights(employee);
-    }
-  } catch (error) {
-    console.error('❌ AI analysis error, using fallback insights:', error);
-    return getFallbackInsights(employee);
-  }
-}
-
-// Helper function to generate fallback insights
-function getFallbackInsights(employee) {
-  const performanceScore = employee?.performanceScore || 50;
-  const projectContribution = employee?.projectContribution || 0;
-  
-  return {
-    promotionReadiness: {
-      score: Math.min(performanceScore + 10, 100),
-      reasons: performanceScore > 70 
-        ? ['Consistently meets performance expectations']
-        : ['Performance evaluation needed'],
-      nextSteps: [
-        'Review performance metrics with manager',
-        'Set clear development goals'
-      ]
-    },
-    attritionRisk: {
-      score: Math.max(100 - performanceScore - 20, 0),
-      factors: performanceScore < 50 
-        ? ['Performance concerns identified'] 
-        : ['Regular check-ins recommended'],
-      mitigation: [
-        'Schedule career development discussion',
-        'Review workload and work-life balance'
-      ]
-    },
-    strengths: [
-      'Team collaboration',
-      'Problem-solving skills',
-      'Adaptability'
-    ],
-    improvementAreas: [
-      'Technical skill development',
-      'Time management',
-      'Cross-functional communication'
-    ],
-    recommendations: [
-      'Participate in skill development workshops',
-      'Seek mentorship opportunities',
-      'Set clear quarterly objectives'
-    ]
-  };
-}
-
-// Get current user's employee profile
-// Duplicate route removed - using the first /me route instead
 
 // Get current user's payroll records
 router.get('/me/payroll', verifyJWT, async (req, res) => {
@@ -1176,50 +993,13 @@ router.get('/:id/performance', verifyJWT, async (req, res) => {
 // Generate AI insights for employee
 router.post('/:id/ai-insights', verifyJWT, async (req, res) => {
   try {
-    const employee = await Employee.findById(req.params.id)
-      .populate('user', 'name')
-      .populate('department', 'name');
-    
-    if (!employee) {
-      return res.status(404).json({ error: 'Employee not found' });
-    }
-    
-    // Get data for AI analysis
-    const projects = await Project.find({
-      'teamMembers.employee': employee._id
-    }).limit(10);
-    
-    const feedback = await Feedback.find({
-      employee: employee._id,
-      status: { $in: ['submitted', 'reviewed'] }
-    }).limit(10);
-    
-    const okrs = await OKR.find({
-      employee: employee._id,
-      year: new Date().getFullYear()
-    });
-    
-    // Generate AI insights
-    const insights = await generateAIInsights(employee, projects, feedback, okrs);
-    
-    // Update employee record
-    employee.aiInsights = {
-      ...insights,
-      lastAnalyzed: new Date()
-    };
-    await employee.save();
-    
-    res.json({
-      employee: {
-        id: employee._id,
-        name: employee.user.name,
-        position: employee.position
-      },
-      insights: employee.aiInsights
-    });
+    const result = await generateEmployeeAIInsights(req.params.id);
+    res.json(result);
   } catch (error) {
     console.error('Error generating AI insights:', error);
-    res.status(500).json({ error: 'Failed to generate AI insights' });
+    res.status(error.message === 'Employee not found' ? 404 : 500).json({
+      error: error.message === 'Employee not found' ? error.message : 'Failed to generate AI insights',
+    });
   }
 });
 

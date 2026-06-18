@@ -25,7 +25,9 @@ const {
   getAllEmployees,
   createEmployee,
   updateEmployee,
-  getEmployeeStats
+  getEmployeeStats,
+  getEmployeeById,
+  getEmployeeProjects,
 } = require('../controllers/employeeController');
 
 // HR Debug endpoint
@@ -281,7 +283,7 @@ router.post('/bulk-update-status', verifyJWT, isHRorAdmin, async (req, res) => {
       return res.status(400).json({ error: 'Application IDs are required' });
     }
 
-    if (!['pending', 'reviewed', 'shortlisted', 'rejected'].includes(status)) {
+    if (!['pending', 'reviewed', 'shortlisted', 'hire_recommended', 'hired', 'rejected'].includes(status)) {
       return res.status(400).json({ error: 'Invalid status' });
     }
 
@@ -352,34 +354,11 @@ router.get('/export-applications', verifyJWT, isHRorAdmin, async (req, res) => {
 
 // Employee Management Routes for HR
 router.get('/employees', verifyJWT, isHRorAdmin, getAllEmployees);
-router.get('/employees/:id', verifyJWT, isHRorAdmin, async (req, res) => {
-  try {
-    const Employee = require('../models/Employee');
-    const { syncEmployeePerformanceFromProjects } = require('../services/projectPerformanceService');
-    const employee = await Employee.findById(req.params.id)
-      .populate('user', 'name email')
-      .populate('department', 'name')
-      .populate({ path: 'manager', select: 'position', populate: { path: 'user', select: 'name email' } });
-    
-    if (!employee) {
-      return res.status(404).json({ error: 'Employee not found' });
-    }
-
-    await syncEmployeePerformanceFromProjects(employee._id);
-    const refreshed = await Employee.findById(employee._id)
-      .populate('user', 'name email')
-      .populate('department', 'name')
-      .populate({ path: 'manager', select: 'position', populate: { path: 'user', select: 'name email' } });
-    
-    res.json(refreshed);
-  } catch (error) {
-    console.error('Error fetching employee:', error);
-    res.status(500).json({ error: 'Failed to fetch employee' });
-  }
-});
+router.get('/employees/stats', verifyJWT, isHRorAdmin, getEmployeeStats);
+router.get('/employees/:id/projects', verifyJWT, isHRorAdmin, getEmployeeProjects);
+router.get('/employees/:id', verifyJWT, isHRorAdmin, getEmployeeById);
 router.post('/employees', verifyJWT, isHRorAdmin, createEmployee);
 router.put('/employees/:id', verifyJWT, isHRorAdmin, updateEmployee);
-router.get('/employees/stats', verifyJWT, isHRorAdmin, getEmployeeStats);
 
 // Projects endpoint for HR
 router.get('/projects', verifyJWT, isHRorAdmin, async (req, res) => {

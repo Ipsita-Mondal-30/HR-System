@@ -25,7 +25,11 @@ const notificationSchema = new mongoose.Schema({
       'resume_updated',
       'achievement_awarded',
       'payroll_approved',
-      'support_request'
+      'support_request',
+      'hr_verified',
+      'password_reset',
+      'hire_recommended',
+      'hire_approved',
     ],
     required: true
   },

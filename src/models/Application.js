@@ -20,6 +20,7 @@ const applicationSchema = new mongoose.Schema({
     actionPlan: [String],
     resumeTips: [String],
     interviewTips: [String],
+    projectEnhancements: [String],
     analyzedAt: Date,
     source: String,
   },
@@ -35,11 +36,15 @@ const applicationSchema = new mongoose.Schema({
   
   status: {
     type: String,
-    enum: ['pending', 'reviewed', 'shortlisted', 'rejected'],
+    enum: ['pending', 'reviewed', 'shortlisted', 'hire_recommended', 'hired', 'rejected'],
     default: 'pending',
   },
+  hireRecommendedAt: Date,
+  hiredAt: Date,
+  employeeProfile: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee' },
   resumeText: String,
   coverLetter: String,
+  generatedCoverLetter: String,
   applicationData: {
     linkedIn: String,
     github: String,
@@ -48,6 +53,41 @@ const applicationSchema = new mongoose.Schema({
     whyInterested: String
   },
   hrNotes: String,
+  resumeFile: {
+    originalName: String,
+    url: String,
+    mimeType: String,
+    sizeBytes: Number,
+    uploadedAt: Date,
+  },
+  parsedResume: {
+    name: String,
+    email: String,
+    phone: String,
+    skills: [String],
+    education: [String],
+    projects: [String],
+    experience: [String],
+  },
+  jobDescriptionText: String,
+  jobDescriptionSource: { type: String, enum: ['paste', 'pdf', 'job'], default: 'job' },
+  atsAnalysis: {
+    overallScore: Number,
+    atsScore: Number,
+    skillMatchScore: Number,
+    experienceScore: Number,
+    missingSkills: [String],
+    strengths: [String],
+    weaknesses: [String],
+    recommendations: [String],
+    keywordCoverage: Number,
+    bulletImprovements: [String],
+    wordingSuggestions: [String],
+    projectEnhancements: [String],
+    improvedBullets: String,
+    analyzedAt: Date,
+    source: String,
+  },
   createdAt: { type: Date, default: Date.now }
 });
 

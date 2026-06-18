@@ -46,6 +46,7 @@ const createJob = async (req, res) => {
     const departmentId = department && department.trim() ? department : null;
     const roleId = role && role.trim() ? role : null;
 
+    const isAdminUser = req.user.role === 'admin';
     const job = await Job.create({
       title: title.trim(),
       department: departmentId,
@@ -64,8 +65,8 @@ const createJob = async (req, res) => {
       tags: Array.isArray(tags) ? tags : (tags ? tags.split(',').map(t => t.trim()).filter(Boolean) : []),
       rating,
       createdBy: req.user._id,
-      status: 'active', // HR-created jobs are active by default
-      isApproved: true, // HR jobs are auto-approved
+      status: isAdminUser ? 'active' : 'pending',
+      isApproved: isAdminUser,
     });
 
     // Verify the job was created with correct status
@@ -78,34 +79,38 @@ const createJob = async (req, res) => {
       companyName: verifiedJob.companyName
     });
 
-    // Create notifications for all candidates about the new job
-    try {
-      const User = require('../models/User');
-      const notificationService = require('../services/notificationService');
-      
-      // Find all candidates with email notifications enabled
-      const candidates = await User.find({ 
-        role: 'candidate',
-        emailNotifications: { $ne: false } // Include true or undefined
-      }).select('_id');
+    // Notify candidates only when admin auto-approves (admin-created jobs)
+    if (isAdminUser) {
+      try {
+        const User = require('../models/User');
+        const notificationService = require('../services/notificationService');
+        
+        const candidates = await User.find({ 
+          role: 'candidate',
+          emailNotifications: { $ne: false }
+        }).select('_id');
 
-      // Create notifications in background (don't wait)
-      candidates.forEach(async (candidate) => {
-        await notificationService.notifyNewJobPosted(
-          candidate._id,
-          job._id,
-          job.title,
-          job.companyName || 'Company'
-        );
-      });
+        candidates.forEach(async (candidate) => {
+          await notificationService.notifyNewJobPosted(
+            candidate._id,
+            job._id,
+            job.title,
+            job.companyName || 'Company'
+          );
+        });
 
-      console.log(`📢 Created job notifications for ${candidates.length} candidates`);
-    } catch (notifError) {
-      console.error('Failed to create job notifications:', notifError);
-      // Don't fail job creation if notifications fail
+        console.log(`📢 Created job notifications for ${candidates.length} candidates`);
+      } catch (notifError) {
+        console.error('Failed to create job notifications:', notifError);
+      }
     }
 
-    res.status(201).json(job);
+    res.status(201).json({
+      ...job.toObject(),
+      message: isAdminUser
+        ? 'Job published successfully'
+        : 'Job submitted for admin approval. It will be visible to candidates once approved.',
+    });
   } catch (err) {
     console.error("🔥 Job creation failed:", err.message, err);
     res.status(500).json({ error: "Job creation failed", details: err.message });

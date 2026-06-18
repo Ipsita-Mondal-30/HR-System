@@ -211,6 +211,17 @@ router.post('/apply-with-resume', verifyJWT, isCandidate, async (req, res) => {
         }
       });
 
+      // Store resume file metadata
+      if (req.file) {
+        application.resumeFile = {
+          originalName: req.file.originalname,
+          url: resumeUrl,
+          mimeType: req.file.mimetype || 'application/pdf',
+          sizeBytes: req.file.size,
+          uploadedAt: new Date(),
+        };
+      }
+
       await application.save();
 
       // Update user profile with new information if provided
@@ -225,36 +236,18 @@ router.post('/apply-with-resume', verifyJWT, isCandidate, async (req, res) => {
         await User.findByIdAndUpdate(user._id, updateData);
       }
 
-      // Run AI scoring in background (don't await - let it run async)
+      // Run Groq ATS analysis in background
       (async () => {
       try {
-        const agent = require('../controllers/agentController');
-        console.log('🤖 Starting AI analysis for application:', application._id);
-
-        // Create a mock response object for the agent controller
-        const mockRes = {
-          json: (data) => {
-            console.log('✅ AI analysis completed:', data);
-              // Update the application with AI insights (already done in agent controller)
-          },
-          status: (code) => ({
-            json: (data) => {
-              console.log('AI analysis status:', code, data);
-              if (code !== 200) {
-                console.error('AI analysis failed:', data);
-              }
-            }
-          })
-        };
-
-          // Call agent controller - this will send emails to HR and candidate
-        await agent.getMatchScore(
-            { params: { applicationId: application._id.toString() } },
-          mockRes
-        );
+        const { analyzeApplicationById } = require('../services/applicationAnalysisService');
+        console.log('🤖 Starting Groq ATS analysis for application:', application._id);
+        await analyzeApplicationById(application._id.toString(), {
+          createdBy: user._id,
+          sendEmails: true,
+        });
+        console.log('✅ Groq ATS analysis completed for application:', application._id);
       } catch (agentError) {
-          console.error('❌ AI scoring failed:', agentError);
-        // Don't fail the application if AI scoring fails
+          console.error('❌ Groq ATS analysis failed:', agentError.message);
       }
       })();
 

@@ -89,20 +89,25 @@ const employeeSchema = new mongoose.Schema({
   
   // AI Insights
   aiInsights: {
+    summary: String,
+    aiSource: { type: String, enum: ['gemini', 'cohere', 'fallback', 'ai'], default: 'ai' },
     promotionReadiness: {
       score: Number,
       reasons: [String],
-      lastUpdated: Date
+      nextSteps: [String],
+      lastUpdated: Date,
     },
     attritionRisk: {
       score: Number,
       factors: [String],
-      lastUpdated: Date
+      mitigation: [String],
+      lastUpdated: Date,
     },
     strengths: [String],
     improvementAreas: [String],
-    lastAnalyzed: Date
-  }
+    recommendations: [String],
+    lastAnalyzed: Date,
+  },
 }, {
   timestamps: true
 });

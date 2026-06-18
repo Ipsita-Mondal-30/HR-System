@@ -32,6 +32,26 @@ const interviewSchema = new mongoose.Schema({
   meetingLink: String,
   location: String,
   notes: String,
+  completedAt: Date,
+  recording: {
+    url: String,
+    type: { type: String, enum: ['upload', 'link'], default: 'link' },
+    fileName: String,
+    uploadedAt: Date,
+    uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  },
+  hireApproval: {
+    status: {
+      type: String,
+      enum: ['none', 'pending', 'approved', 'rejected'],
+      default: 'none',
+    },
+    recommendedAt: Date,
+    reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    reviewedAt: Date,
+    adminNotes: String,
+    employeeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee' },
+  },
   scorecard: {
     technicalSkills: {
       type: Number,
