@@ -4,6 +4,7 @@ const passport = require('passport');
 const router = express.Router();
 const User = require('../models/User');
 const { verifyJWT } = require('../middleware/auth');
+const { resolveFrontendUrl } = require('../utils/frontendUrl');
 
 // Manual login endpoint (for users who exist in database)
 router.post('/login', async (req, res) => {
@@ -72,23 +73,20 @@ router.post('/login', async (req, res) => {
 // --- Google OAuth login ---
 router.get('/google', (req, res, next) => {
   try {
-    const referer = req.get('referer') || '';
-    const refererOrigin = (() => {
-      try { return referer ? new URL(referer).origin : ''; } catch { return ''; }
-    })();
-    const originHint = req.headers.origin || refererOrigin || req.query.frontend || process.env.FRONTEND_URL || 'http://localhost:3000';
-    // Persist desired frontend for callback
+    const frontendUrl = resolveFrontendUrl(req);
     const isSecure = req.secure || req.headers['x-forwarded-proto'] === 'https';
-    res.cookie('frontend_url', originHint, {
+
+    res.cookie('frontend_url', frontendUrl, {
       httpOnly: false,
       secure: isSecure,
       sameSite: isSecure ? 'none' : 'lax',
       maxAge: 10 * 60 * 1000,
+      path: '/',
     });
-    // Pass hint via OAuth state
+
     passport.authenticate('google', {
       scope: ['profile', 'email'],
-      state: encodeURIComponent(originHint),
+      state: encodeURIComponent(frontendUrl),
     })(req, res, next);
   } catch (e) {
     console.error('❌ OAuth init error:', e);
@@ -99,22 +97,16 @@ router.get('/google', (req, res, next) => {
 // --- Google OAuth callback ---
 router.get('/google/callback', (req, res, next) => {
   passport.authenticate('google', { session: false }, (err, user, info) => {
-    const stateFrontend = (() => {
-      try { return decodeURIComponent(req.query.state || ''); } catch { return ''; }
-    })();
-    const cookieFrontend = req.cookies.frontend_url;
-    const origin = req.headers.origin || '';
-    const isLocal = origin.includes('localhost:3000') || origin.includes('127.0.0.1:3000');
-    const FRONTEND_URL = stateFrontend || cookieFrontend || (isLocal ? 'http://localhost:3000' : (process.env.FRONTEND_URL || "http://localhost:3000"));
+    const frontendUrl = resolveFrontendUrl(req);
 
     if (err) {
       console.error('❌ OAuth authentication error:', err);
-      return res.redirect(`${FRONTEND_URL}/login?error=oauth_failed&message=${encodeURIComponent(err.message)}`);
+      return res.redirect(`${frontendUrl}/login?error=oauth_failed&message=${encodeURIComponent(err.message)}`);
     }
     
     if (!user) {
       console.error('❌ OAuth failed - no user returned');
-      return res.redirect(`${FRONTEND_URL}/login?error=oauth_failed&message=${encodeURIComponent('Authentication failed')}`);
+      return res.redirect(`${frontendUrl}/login?error=oauth_failed&message=${encodeURIComponent('Authentication failed')}`);
     }
 
     try {
@@ -124,20 +116,19 @@ router.get('/google/callback', (req, res, next) => {
         { expiresIn: '7d' }
       );
 
-      // Set cookie
       const isSecure = req.secure || req.headers['x-forwarded-proto'] === 'https';
       res.cookie('auth_token', token, {
         httpOnly: false,
         secure: isSecure,
         sameSite: isSecure ? 'none' : 'lax',
-        maxAge: 7 * 24 * 60 * 60 * 1000
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+        path: '/',
       });
 
-      // Redirect through auth callback so token is always saved on the Vercel domain
-      return res.redirect(`${FRONTEND_URL}/auth/callback?token=${token}`);
+      return res.redirect(`${frontendUrl}/auth/callback?token=${token}`);
     } catch (tokenError) {
       console.error('❌ Token generation error:', tokenError);
-      res.redirect(`${FRONTEND_URL}/login?error=token_failed&message=${encodeURIComponent('Failed to generate authentication token')}`);
+      res.redirect(`${frontendUrl}/login?error=token_failed&message=${encodeURIComponent('Failed to generate authentication token')}`);
     }
   })(req, res, next);
 });

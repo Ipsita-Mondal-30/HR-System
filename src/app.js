@@ -268,6 +268,14 @@ app.get('/api/health', (req, res) => {
   res.redirect(307, '/health');
 });
 
+// Safety net: OAuth sometimes lands here if frontend URL resolution fails
+app.get('/auth/callback', (req, res) => {
+  const { resolveFrontendUrl } = require('./utils/frontendUrl');
+  const frontendUrl = resolveFrontendUrl(req);
+  const query = new URLSearchParams(req.query).toString();
+  res.redirect(302, `${frontendUrl}/auth/callback${query ? `?${query}` : ''}`);
+});
+
 // 404 + Error handler
 app.use((req, res) => res.status(404).json({ error: `Route not found: ${req.method} ${req.url}` }));
 app.use((err, req, res, next) => {
