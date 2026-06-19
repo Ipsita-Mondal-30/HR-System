@@ -450,7 +450,16 @@ router.get('/debug-users', async (req, res) => {
 
 // --- Logout route ---
 router.post('/logout', (req, res) => {
-  res.clearCookie('auth_token');
+  const isSecure = req.secure || req.headers['x-forwarded-proto'] === 'https';
+  const cookieOptions = {
+    httpOnly: false,
+    secure: isSecure,
+    sameSite: isSecure ? 'none' : 'lax',
+    path: '/',
+  };
+
+  res.clearCookie('auth_token', cookieOptions);
+  res.clearCookie('token', cookieOptions);
   res.status(200).json({ message: 'Logged out successfully' });
 });
 
