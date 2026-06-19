@@ -404,4 +404,75 @@ router.put('/support/tickets/:id/respond', verifyJWT, isHRorAdmin, respondSuppor
 router.get('/support/feedback-requests', verifyJWT, isHRorAdmin, listFeedbackRequests);
 router.put('/support/feedback-requests/:id/respond', verifyJWT, isHRorAdmin, respondFeedbackRequest);
 
+// HR profile — phone & position (HR completes); company fields set by admin on approval
+router.get('/profile', verifyJWT, isHRorAdmin, async (req, res) => {
+  try {
+    if (req.user.role !== 'hr') {
+      return res.status(403).json({ error: 'HR profile is only available for HR users' });
+    }
+
+    const user = await User.findById(req.user._id).select(
+      'name email phone position company industry companySize website linkedIn isVerified verificationNotes'
+    );
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json(user);
+  } catch (error) {
+    console.error('Error fetching HR profile:', error);
+    res.status(500).json({ error: 'Failed to fetch profile' });
+  }
+});
+
+router.put('/profile', verifyJWT, isHRorAdmin, async (req, res) => {
+  try {
+    if (req.user.role !== 'hr') {
+      return res.status(403).json({ error: 'HR profile is only available for HR users' });
+    }
+
+    const { phone, position } = req.body;
+    const user = await User.findById(req.user._id);
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (phone !== undefined) {
+      if (!String(phone).trim()) {
+        return res.status(400).json({ error: 'Phone is required' });
+      }
+      user.phone = String(phone).trim();
+    }
+
+    if (position !== undefined) {
+      if (!String(position).trim()) {
+        return res.status(400).json({ error: 'Position is required' });
+      }
+      user.position = String(position).trim();
+    }
+
+    await user.save();
+
+    res.json({
+      message: 'Profile updated successfully',
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        position: user.position,
+        company: user.company,
+        industry: user.industry,
+        companySize: user.companySize,
+        isVerified: user.isVerified,
+      },
+    });
+  } catch (error) {
+    console.error('Error updating HR profile:', error);
+    res.status(500).json({ error: 'Failed to update profile' });
+  }
+});
+
 module.exports = router;

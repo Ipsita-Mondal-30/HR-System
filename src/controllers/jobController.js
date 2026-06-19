@@ -12,6 +12,18 @@ const createJob = async (req, res) => {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
+    const User = require('../models/User');
+    if (req.user.role === 'hr') {
+      const hrUser = await User.findById(req.user._id).select('isVerified company companySize');
+      if (!hrUser?.isVerified) {
+        return res.status(403).json({
+          error: 'Your HR account must be verified by an admin before you can post jobs.',
+          code: 'HR_NOT_VERIFIED',
+        });
+      }
+      req.hrProfile = hrUser;
+    }
+
     const {
       title,
       department,
@@ -52,9 +64,9 @@ const createJob = async (req, res) => {
       department: departmentId,
       role: roleId,
       description: description.trim(),
-      companyName: companyName?.trim() || req.user.company || 'Company',
+      companyName: companyName?.trim() || req.hrProfile?.company || req.user.company || 'Company',
       companyLogo,
-      companySize,
+      companySize: companySize || req.hrProfile?.companySize,
       location: location?.trim(),
       remote: remote || false,
       employmentType,

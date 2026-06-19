@@ -5,14 +5,14 @@ const {
   getJobById,
   updateJob,
 } = require('../controllers/jobController');
-const { verifyJWT, isHR } = require('../middleware/auth');
+const { verifyJWT, isHR, requireVerifiedHR } = require('../middleware/auth');
 const Job = require('../models/Job');
 
 const router = express.Router();
 
 // Protected routes
-router.post('/', verifyJWT, isHR, createJob);
-router.put('/:id', verifyJWT, isHR, updateJob);
+router.post('/', verifyJWT, isHR, requireVerifiedHR, createJob);
+router.put('/:id', verifyJWT, isHR, requireVerifiedHR, updateJob);
 router.delete('/:id', verifyJWT, isHR, async (req, res) => {
   try {
     const job = await Job.findByIdAndDelete(req.params.id);

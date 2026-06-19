@@ -75,6 +75,29 @@ exports.isHRorAdmin = (req, res, next) => {
   res.status(403).json({ message: "HR/Admin only" });
 };
 
+/** HR users must be admin-verified before posting or editing jobs. Admins bypass. */
+exports.requireVerifiedHR = async (req, res, next) => {
+  if (req.user?.role === 'admin') return next();
+  if (req.user?.role !== 'hr') {
+    return res.status(403).json({ message: 'HR access required' });
+  }
+
+  try {
+    const User = require('../models/User');
+    const user = await User.findById(req.user._id).select('isVerified');
+    if (!user?.isVerified) {
+      return res.status(403).json({
+        error: 'Your HR account must be verified by an admin before you can post jobs.',
+        code: 'HR_NOT_VERIFIED',
+      });
+    }
+    next();
+  } catch (err) {
+    console.error('requireVerifiedHR error:', err);
+    res.status(500).json({ error: 'Verification check failed' });
+  }
+};
+
 // Generic auth token verification (alias for verifyJWT)
 exports.authenticateToken = exports.verifyJWT;
 

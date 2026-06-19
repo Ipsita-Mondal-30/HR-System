@@ -328,7 +328,9 @@ router.get('/me', async (req, res) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findById(decoded._id).select('name email role isActive isVerified');
+    const user = await User.findById(decoded._id).select(
+      'name email role isActive isVerified phone position company industry companySize'
+    );
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
@@ -341,6 +343,11 @@ router.get('/me', async (req, res) => {
       role: user.role,
       isActive: user.isActive,
       isVerified: user.isVerified,
+      phone: user.phone,
+      position: user.position,
+      company: user.company,
+      industry: user.industry,
+      companySize: user.companySize,
     });
   } catch (err) {
     res.status(401).json({ error: 'Invalid token' });

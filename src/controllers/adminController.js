@@ -331,7 +331,7 @@ const getInterviews = async (req, res) => {
 const verifyHR = async (req, res) => {
   try {
     const { userId } = req.params;
-    const { action, notes } = req.body; // 'approve' or 'reject'
+    const { action, notes, company, industry, companySize } = req.body;
 
     console.log(`📊 ${action === 'approve' ? 'Approving' : 'Rejecting'} HR verification for user:`, userId);
 
@@ -341,6 +341,14 @@ const verifyHR = async (req, res) => {
     }
 
     if (action === 'approve') {
+      if (!company?.trim() || !industry?.trim() || !companySize?.trim()) {
+        return res.status(400).json({
+          error: 'Company, industry, and company size are required to approve an HR account.',
+        });
+      }
+      user.company = company.trim();
+      user.industry = industry.trim();
+      user.companySize = companySize.trim();
       user.isVerified = true;
       if (notes) user.verificationNotes = notes;
     } else if (action === 'reject') {
@@ -383,6 +391,11 @@ const verifyHR = async (req, res) => {
         name: user.name,
         email: user.email,
         isVerified: user.isVerified,
+        company: user.company,
+        industry: user.industry,
+        companySize: user.companySize,
+        phone: user.phone,
+        position: user.position,
         verificationNotes: user.verificationNotes
       }
     });
