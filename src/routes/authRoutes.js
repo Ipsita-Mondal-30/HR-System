@@ -354,6 +354,77 @@ router.get('/me', async (req, res) => {
   }
 });
 
+// --- HR profile (phone & position) — also available at /api/hr/profile ---
+router.get('/hr-profile', verifyJWT, async (req, res) => {
+  try {
+    if (req.user.role !== 'hr') {
+      return res.status(403).json({ error: 'HR profile is only available for HR users' });
+    }
+
+    const user = await User.findById(req.user._id).select(
+      'name email phone position company industry companySize website linkedIn isVerified verificationNotes'
+    );
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json(user);
+  } catch (err) {
+    console.error('Error fetching HR profile:', err);
+    res.status(500).json({ error: 'Failed to fetch profile' });
+  }
+});
+
+router.put('/hr-profile', verifyJWT, async (req, res) => {
+  try {
+    if (req.user.role !== 'hr') {
+      return res.status(403).json({ error: 'HR profile is only available for HR users' });
+    }
+
+    const { phone, position } = req.body;
+    const user = await User.findById(req.user._id);
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (phone !== undefined) {
+      if (!String(phone).trim()) {
+        return res.status(400).json({ error: 'Phone is required' });
+      }
+      user.phone = String(phone).trim();
+    }
+
+    if (position !== undefined) {
+      if (!String(position).trim()) {
+        return res.status(400).json({ error: 'Position is required' });
+      }
+      user.position = String(position).trim();
+    }
+
+    await user.save();
+
+    res.json({
+      message: 'Profile updated successfully',
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        position: user.position,
+        company: user.company,
+        industry: user.industry,
+        companySize: user.companySize,
+        isVerified: user.isVerified,
+      },
+    });
+  } catch (err) {
+    console.error('Error updating HR profile:', err);
+    res.status(500).json({ error: 'Failed to update profile' });
+  }
+});
+
 // --- Test complete auth flow ---
 router.post('/test-complete-flow', async (req, res) => {
   try {
