@@ -94,6 +94,50 @@ router.put('/profile', verifyJWT, isCandidate, async (req, res) => {
   }
 });
 
+// Upload candidate profile picture
+router.post('/profile/photo', verifyJWT, isCandidate, (req, res) => {
+  const profilePictureUpload = require('../middleware/profilePictureUpload');
+
+  profilePictureUpload.single('photo')(req, res, async (err) => {
+    if (err) {
+      console.error('Profile photo upload error:', err);
+      let message = 'Failed to upload photo';
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        message = 'Photo must be 5MB or smaller';
+      } else if (err.message) {
+        message = err.message;
+      }
+      return res.status(400).json({ error: message });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'No photo provided' });
+    }
+
+    try {
+      const photoUrl = req.file.path || req.file.secure_url || req.file.url;
+      if (!photoUrl) {
+        return res.status(500).json({ error: 'Upload succeeded but no URL was returned' });
+      }
+
+      const user = await User.findByIdAndUpdate(
+        req.user._id,
+        { profilePicture: photoUrl },
+        { new: true, runValidators: true }
+      ).select('-password');
+
+      res.json({
+        message: 'Profile photo updated',
+        profilePicture: photoUrl,
+        profileCompleteness: calculateProfileCompleteness(user),
+      });
+    } catch (uploadErr) {
+      console.error('Error saving profile photo:', uploadErr);
+      res.status(500).json({ error: 'Failed to save profile photo' });
+    }
+  });
+});
+
 // Get candidate dashboard stats
 router.get('/dashboard-stats', verifyJWT, isCandidate, async (req, res) => {
   try {
