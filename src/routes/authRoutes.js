@@ -170,19 +170,7 @@ router.post('/set-role', async (req, res) => {
   }
 
   try {
-    // Ensure MongoDB connection
-    const mongoose = require('mongoose');
-    if (mongoose.connection.readyState !== 1) {
-      console.log('⚠️ MongoDB not connected, attempting to connect...');
-      await mongoose.connect(process.env.MONGODB_URI, {
-        serverSelectionTimeoutMS: 10000
-      });
-      console.log('✅ MongoDB connected successfully');
-    }
-
     const userId = decoded._id || decoded.id;
-    console.log('🔍 Looking for user with ID:', userId);
-    
     let user = await User.findById(userId);
     
     if (!user) {
