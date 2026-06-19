@@ -133,23 +133,8 @@ router.get('/google/callback', (req, res, next) => {
         maxAge: 7 * 24 * 60 * 60 * 1000
       });
 
-      // Redirect to correct frontend URL
-      if (!user.role) {
-        return res.redirect(`${FRONTEND_URL}/role-select?token=${token}`);
-      }
-
-      switch (user.role) {
-        case 'admin':
-          return res.redirect(`${FRONTEND_URL}/admin/dashboard?token=${token}`);
-        case 'hr':
-          return res.redirect(`${FRONTEND_URL}/hr/dashboard?token=${token}`);
-        case 'candidate':
-          return res.redirect(`${FRONTEND_URL}/candidate/dashboard?token=${token}`);
-        case 'employee':
-          return res.redirect(`${FRONTEND_URL}/employee/dashboard?token=${token}`);
-        default:
-          return res.redirect(`${FRONTEND_URL}/?token=${token}`);
-      }
+      // Redirect through auth callback so token is always saved on the Vercel domain
+      return res.redirect(`${FRONTEND_URL}/auth/callback?token=${token}`);
     } catch (tokenError) {
       console.error('❌ Token generation error:', tokenError);
       res.redirect(`${FRONTEND_URL}/login?error=token_failed&message=${encodeURIComponent('Failed to generate authentication token')}`);

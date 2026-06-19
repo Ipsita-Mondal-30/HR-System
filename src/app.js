@@ -71,6 +71,7 @@ const defaultDevOrigins = [
 
 const defaultProdOrigins = [
   'https://hr-system-x2uf.onrender.com',
+  'https://hr-frontend-54b2.vercel.app',
 ];
 
 const allowedOrigins = [
