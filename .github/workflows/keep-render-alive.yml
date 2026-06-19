@@ -1,0 +1,22 @@
+name: Keep Render Server Alive
+
+on:
+  schedule:
+    # Render free tier sleeps after ~15 min idle — ping every 10 minutes
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping-render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ping Render health endpoint
+        env:
+          RENDER_SERVER_URL: ${{ secrets.RENDER_SERVER_URL }}
+        run: |
+          URL="${RENDER_SERVER_URL:-https://hr-system-x2uf.onrender.com}"
+          echo "Pinging ${URL}/health"
+          curl -fsS --max-time 60 "${URL}/health"
+          echo ""
+          echo "Ping successful at $(date -u +%Y-%m-%dT%H:%M:%SZ)"

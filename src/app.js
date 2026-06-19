@@ -252,7 +252,7 @@ app.get('/api/frontend-debug', (req, res) => {
   });
 });
 
-// Health
+// Health — used by uptime monitors and GitHub Actions keep-alive cron
 app.get('/health', (req, res) => {
   res.json({
     status: 'OK',
@@ -261,6 +261,10 @@ app.get('/health', (req, res) => {
     version: '1.0.1-oauth-fix',
     database: mongoose.connection.db ? mongoose.connection.db.databaseName : 'Not connected',
   });
+});
+
+app.get('/api/health', (req, res) => {
+  res.redirect(307, '/health');
 });
 
 // 404 + Error handler
