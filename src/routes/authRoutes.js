@@ -327,8 +327,7 @@ router.post('/set-role', async (req, res) => {
 
 
 // --- Utility: Get logged-in user's info from JWT ---
-router.get('/me', (req, res) => {
-  // Check for token in cookies first, then Authorization header
+router.get('/me', async (req, res) => {
   let token = req.cookies.auth_token;
   
   if (!token) {
@@ -341,10 +340,20 @@ router.get('/me', (req, res) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
-    console.log('🔍 User info retrieved:', decoded.name, decoded.email);
-    
-    res.status(200).json(decoded);
+    const user = await User.findById(decoded._id).select('name email role isActive isVerified');
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.status(200).json({
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      isActive: user.isActive,
+      isVerified: user.isVerified,
+    });
   } catch (err) {
     res.status(401).json({ error: 'Invalid token' });
   }
