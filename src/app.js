@@ -265,7 +265,13 @@ app.get('/health', (req, res) => {
 });
 
 app.get('/api/health', (req, res) => {
-  res.redirect(307, '/health');
+  res.json({
+    status: 'OK',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    version: '1.0.1-oauth-fix',
+    database: mongoose.connection.db ? mongoose.connection.db.databaseName : 'Not connected',
+  });
 });
 
 // Safety net: OAuth sometimes lands here if frontend URL resolution fails

@@ -383,27 +383,35 @@ router.put('/hr-profile', verifyJWT, async (req, res) => {
     }
 
     const { phone, position } = req.body;
-    const user = await User.findById(req.user._id);
-
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
+    const updates = {};
 
     if (phone !== undefined) {
       if (!String(phone).trim()) {
         return res.status(400).json({ error: 'Phone is required' });
       }
-      user.phone = String(phone).trim();
+      updates.phone = String(phone).trim();
     }
 
     if (position !== undefined) {
       if (!String(position).trim()) {
         return res.status(400).json({ error: 'Position is required' });
       }
-      user.position = String(position).trim();
+      updates.position = String(position).trim();
     }
 
-    await user.save();
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: 'No profile fields to update' });
+    }
+
+    const user = await User.findByIdAndUpdate(
+      req.user._id,
+      { $set: updates },
+      { new: true, runValidators: true }
+    ).select('name email phone position company industry companySize isVerified');
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
 
     res.json({
       message: 'Profile updated successfully',
