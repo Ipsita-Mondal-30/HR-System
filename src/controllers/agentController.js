@@ -119,7 +119,18 @@ const getMatchScore = async (req, res) => {
     resumeUrl = application.resumeUrl;
     const { resumeText: existingResumeText } = application;
     const { description } = application.job;
+    const User = require('../models/User');
     hrEmail = application.job.createdBy?.email;
+    if (!hrEmail && application.job.createdBy) {
+      const creatorId =
+        typeof application.job.createdBy === 'object'
+          ? application.job.createdBy._id
+          : application.job.createdBy;
+      if (creatorId) {
+        const creator = await User.findById(creatorId).select('email name');
+        hrEmail = creator?.email;
+      }
+    }
     candidateEmail = application.email;
     candidateName = application.name;
     jobTitle = application.job.title;

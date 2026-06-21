@@ -280,19 +280,14 @@ router.post('/apply-with-resume', verifyJWT, isCandidate, async (req, res) => {
         await User.findByIdAndUpdate(user._id, updateData);
       }
 
-      // Run Groq ATS analysis in background
+      // Score application and email HR + candidate (Groq ATS optional, match score always)
       (async () => {
-      try {
-        const { analyzeApplicationById } = require('../services/applicationAnalysisService');
-        console.log('🤖 Starting Groq ATS analysis for application:', application._id);
-        await analyzeApplicationById(application._id.toString(), {
-          createdBy: user._id,
-          sendEmails: true,
-        });
-        console.log('✅ Groq ATS analysis completed for application:', application._id);
-      } catch (agentError) {
-          console.error('❌ Groq ATS analysis failed:', agentError.message);
-      }
+        try {
+          const { runPostApplicationScoring } = require('../services/applicationScoringService');
+          await runPostApplicationScoring(application._id, user._id);
+        } catch (scoringError) {
+          console.error('❌ Post-application scoring failed:', scoringError.message);
+        }
       })();
 
       // Send confirmation email to candidate
@@ -429,35 +424,14 @@ router.post('/apply', verifyJWT, isCandidate, async (req, res) => {
 
     await application.save();
 
-    // Run AI scoring in background (don't await - let it run async)
+    // Score application and email HR + candidate
     (async () => {
-    try {
-      const agent = require('../controllers/agentController');
-        console.log('🤖 Starting AI analysis for application:', application._id);
-
-        const mockRes = {
-          json: (data) => {
-            console.log('✅ AI analysis completed:', data);
-          },
-          status: (code) => ({
-            json: (data) => {
-              console.log('AI analysis status:', code, data);
-              if (code !== 200) {
-                console.error('AI analysis failed:', data);
-              }
-            }
-          })
-        };
-
-        // Call agent controller - this will send emails to HR and candidate
-        await agent.getMatchScore(
-          { params: { applicationId: application._id.toString() } },
-          mockRes
-      );
-    } catch (agentError) {
-        console.error('❌ AI scoring failed:', agentError);
-      // Don't fail the application if AI scoring fails
-    }
+      try {
+        const { runPostApplicationScoring } = require('../services/applicationScoringService');
+        await runPostApplicationScoring(application._id, user._id);
+      } catch (scoringError) {
+        console.error('❌ Post-application scoring failed:', scoringError.message);
+      }
     })();
 
     // Send confirmation email to candidate
