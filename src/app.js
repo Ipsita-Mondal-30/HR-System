@@ -310,6 +310,9 @@ async function startServer() {
     const userCount = await User.countDocuments();
     console.log(`👥 Found ${userCount} users in database`);
 
+    const { syncCandidateVisibleJobs } = require('./services/jobVisibilityService');
+    await syncCandidateVisibleJobs();
+
     const port = PORT || 8080;
     const server = http.createServer(app);
     initProjectSocket(server, app);

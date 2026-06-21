@@ -59,6 +59,9 @@ const createJob = async (req, res) => {
     const roleId = role && role.trim() ? role : null;
 
     const isAdminUser = req.user.role === 'admin';
+    const isVerifiedHR = req.user.role === 'hr' && req.hrProfile?.isVerified;
+    const publishImmediately = isAdminUser || isVerifiedHR;
+
     const job = await Job.create({
       title: title.trim(),
       department: departmentId,
@@ -77,8 +80,8 @@ const createJob = async (req, res) => {
       tags: Array.isArray(tags) ? tags : (tags ? tags.split(',').map(t => t.trim()).filter(Boolean) : []),
       rating,
       createdBy: req.user._id,
-      status: isAdminUser ? 'active' : 'pending',
-      isApproved: isAdminUser,
+      status: publishImmediately ? 'active' : 'pending',
+      isApproved: publishImmediately,
     });
 
     // Verify the job was created with correct status
@@ -91,8 +94,8 @@ const createJob = async (req, res) => {
       companyName: verifiedJob.companyName
     });
 
-    // Notify candidates only when admin auto-approves (admin-created jobs)
-    if (isAdminUser) {
+    // Notify candidates when job is published live
+    if (publishImmediately) {
       try {
         const User = require('../models/User');
         const notificationService = require('../services/notificationService');
@@ -119,7 +122,7 @@ const createJob = async (req, res) => {
 
     res.status(201).json({
       ...job.toObject(),
-      message: isAdminUser
+      message: publishImmediately
         ? 'Job published successfully'
         : 'Job submitted for admin approval. It will be visible to candidates once approved.',
     });

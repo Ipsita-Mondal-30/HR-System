@@ -568,6 +568,12 @@ router.put('/jobs/:jobId/status', verifyJWT, isHRorAdmin, async (req, res) => {
         const { status, reason } = req.body;
 
         const updateData = { status };
+        if (status === 'active' || status === 'open') {
+            updateData.isApproved = true;
+            updateData.rejectionReason = null;
+        } else if (status === 'rejected') {
+            updateData.isApproved = false;
+        }
         if (reason) {
             updateData.rejectionReason = reason;
         }
@@ -614,13 +620,13 @@ router.post('/jobs/bulk-action', verifyJWT, isHRorAdmin, async (req, res) => {
             case 'approve':
                 await Job.updateMany(
                     { _id: { $in: jobIds } },
-                    { status: 'active' }
+                    { status: 'active', isApproved: true, rejectionReason: null }
                 );
                 break;
             case 'reject':
                 await Job.updateMany(
                     { _id: { $in: jobIds } },
-                    { status: 'rejected', rejectionReason: reason }
+                    { status: 'rejected', isApproved: false, rejectionReason: reason }
                 );
                 break;
             case 'delete':
