@@ -1,6 +1,7 @@
 const axios = require('axios');
 const pdfParse = require('pdf-parse');
 const Application = require('../models/Application');
+const User = require('../models/User');
 const { sendEmail } = require('../utils/email');
 const { CohereClient } = require("cohere-ai"); // ✅ New import
 
@@ -119,7 +120,6 @@ const getMatchScore = async (req, res) => {
     resumeUrl = application.resumeUrl;
     const { resumeText: existingResumeText } = application;
     const { description } = application.job;
-    const User = require('../models/User');
     hrEmail = application.job.createdBy?.email;
     if (!hrEmail && application.job.createdBy) {
       const creatorId =
@@ -160,7 +160,6 @@ const getMatchScore = async (req, res) => {
       console.log('📄 Using existing resume text from application');
     } else {
       // Fallback: create resume text from application data and user profile
-      const User = require('../models/User');
       const user = await User.findById(application.candidate);
       if (user) {
         resumeText = `Name: ${user.name}. Email: ${user.email}. Phone: ${user.phone || 'Not provided'}. Skills: ${user.skills?.join(', ') || 'Not specified'}. Experience: ${user.experience || 'Not specified'}. Bio: ${user.bio || 'Not specified'}. Location: ${user.location || 'Not specified'}.`;
@@ -186,7 +185,6 @@ const getMatchScore = async (req, res) => {
     const jobSkills = application.job.skills || [];
     
     // Get skills from User model (if available)
-    const User = require('../models/User');
     const user = await User.findById(application.candidate);
     const userSkills = user?.skills || [];
     

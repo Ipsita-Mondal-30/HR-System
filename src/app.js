@@ -274,19 +274,15 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// API documentation (Scalar + OpenAPI/Swagger)
+const { setupApiDocs } = require('./config/setupApiDocs');
+
 // Safety net: OAuth sometimes lands here if frontend URL resolution fails
 app.get('/auth/callback', (req, res) => {
   const { resolveFrontendUrl } = require('./utils/frontendUrl');
   const frontendUrl = resolveFrontendUrl(req);
   const query = new URLSearchParams(req.query).toString();
   res.redirect(302, `${frontendUrl}/auth/callback${query ? `?${query}` : ''}`);
-});
-
-// 404 + Error handler
-app.use((req, res) => res.status(404).json({ error: `Route not found: ${req.method} ${req.url}` }));
-app.use((err, req, res, next) => {
-  console.error('Global error:', err);
-  res.status(500).json({ error: err.message || 'Internal Server Error' });
 });
 
 // Start server
@@ -312,6 +308,15 @@ async function startServer() {
 
     const { syncCandidateVisibleJobs } = require('./services/jobVisibilityService');
     await syncCandidateVisibleJobs();
+
+    await setupApiDocs(app);
+
+    // 404 + error handlers must be registered after all routes (including API docs)
+    app.use((req, res) => res.status(404).json({ error: `Route not found: ${req.method} ${req.url}` }));
+    app.use((err, req, res, next) => {
+      console.error('Global error:', err);
+      res.status(500).json({ error: err.message || 'Internal Server Error' });
+    });
 
     const port = PORT || 8080;
     const server = http.createServer(app);
