@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "nodemon --exec babel-node src/server/server.js",
     "build": "babel src --out-dir dist --copy-files",
+    "prestart": "node -e \"require('fs').accessSync('dist/server/server.js')\" || npm run build",
     "start": "node dist/server/server.js",
     "test-server": "node test-server.js",
     "seed": "node reset-and-seed.js",
@@ -47,14 +48,14 @@
     "recharts": "^3.0.2",
     "socket.io": "^4.8.3",
     "swagger-jsdoc": "^6.3.0",
-    "yarn": "^1.22.22"
-  },
-  "devDependencies": {
+    "yarn": "^1.22.22",
     "@babel/cli": "^7.29.7",
     "@babel/core": "^7.29.7",
-    "@babel/node": "^7.29.7",
     "@babel/preset-env": "^7.29.7",
-    "babel-plugin-transform-remove-console": "^6.9.4",
+    "babel-plugin-transform-remove-console": "^6.9.4"
+  },
+  "devDependencies": {
+    "@babel/node": "^7.29.7",
     "nodemon": "^3.1.10",
     "prettier": "^3.6.2"
   }
