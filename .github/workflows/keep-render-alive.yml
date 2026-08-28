@@ -9,7 +9,7 @@ on:
 jobs:
   ping-render:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - name: Ping Render health endpoint
         env:
@@ -17,6 +17,15 @@ jobs:
         run: |
           URL="${RENDER_SERVER_URL:-https://hr-system-x2uf.onrender.com}"
           echo "Pinging ${URL}/health"
-          curl -fsS --max-time 60 "${URL}/health"
-          echo ""
-          echo "Ping successful at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          for attempt in 1 2 3 4; do
+            echo "Attempt ${attempt}/4..."
+            if curl -fsS --connect-timeout 30 --max-time 120 "${URL}/health"; then
+              echo ""
+              echo "Ping successful at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              exit 0
+            fi
+            echo "Attempt ${attempt} failed; waiting 45s for cold start..."
+            sleep 45
+          done
+          echo "All ping attempts failed"
+          exit 1
