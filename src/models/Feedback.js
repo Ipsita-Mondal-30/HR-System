@@ -28,7 +28,7 @@ const feedbackSchema = new mongoose.Schema({
   // Feedback Type
   type: {
     type: String,
-    enum: ['project-feedback', 'performance-review', 'peer-feedback', 'milestone-feedback', 'general'],
+    enum: ['project-feedback', 'performance-review', 'peer-feedback', 'milestone-feedback', 'self-assessment', 'general'],
     required: true
   },
   
@@ -116,6 +116,10 @@ const feedbackSchema = new mongoose.Schema({
   isVisible: {
     type: Boolean,
     default: true
+  },
+  isAnonymous: {
+    type: Boolean,
+    default: false
   },
   
   // Employee Response

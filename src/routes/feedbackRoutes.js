@@ -62,28 +62,76 @@ async function processFeedbackWithAI(feedbackContent, ratings) {
   }
 }
 
+const FEEDBACK_TYPE_ALIASES = {
+  performance: 'performance-review',
+  performance_review: 'performance-review',
+  'performance-review': 'performance-review',
+  peer: 'peer-feedback',
+  peer_feedback: 'peer-feedback',
+  'peer-feedback': 'peer-feedback',
+  project: 'project-feedback',
+  project_feedback: 'project-feedback',
+  'project-feedback': 'project-feedback',
+  milestone: 'milestone-feedback',
+  milestone_feedback: 'milestone-feedback',
+  'milestone-feedback': 'milestone-feedback',
+  self: 'self-assessment',
+  self_assessment: 'self-assessment',
+  'self-assessment': 'self-assessment',
+  improvement: 'general',
+  general: 'general',
+};
+
+const FEEDBACK_TITLES = {
+  'performance-review': 'Performance Review',
+  'peer-feedback': 'Peer Feedback',
+  'project-feedback': 'Project Feedback',
+  'milestone-feedback': 'Milestone Feedback',
+  'self-assessment': 'Self Assessment',
+  general: 'Employee Feedback',
+};
+
 function normalizeFeedbackInput(body) {
   const data = { ...body };
 
-  if (data.type === 'performance_review') {
-    data.type = 'performance-review';
+  if (!data.employee && data.employeeId) {
+    data.employee = data.employeeId;
   }
 
-  if (!data.title) {
-    if (data.reviewPeriod) {
-      data.title = `Performance Review - ${data.reviewPeriod}`;
-    } else if (data.type === 'performance-review') {
-      data.title = `Performance Review - ${new Date().toLocaleDateString()}`;
+  if (!data.content && data.feedback) {
+    data.content = data.feedback;
+  }
+
+  const rawType = String(data.type || 'general').trim().toLowerCase();
+  data.type = FEEDBACK_TYPE_ALIASES[rawType] || FEEDBACK_TYPE_ALIASES[rawType.replace(/[\s_]+/g, '-')] || 'general';
+
+  if (!data.title || !String(data.title).trim()) {
+    if (data.type === 'performance-review') {
+      data.title = `Performance Review - ${data.reviewPeriod || new Date().toLocaleDateString()}`;
     } else {
-      data.title = 'Employee Feedback';
+      data.title = FEEDBACK_TITLES[data.type] || 'Employee Feedback';
     }
   }
 
-  if (data.type === 'performance-review' && (!data.status || data.status === 'draft')) {
+  if (!data.status || data.status === 'draft') {
     data.status = 'submitted';
   }
 
   return data;
+}
+
+async function resolveEmployee(employeeId) {
+  if (!employeeId) return null;
+  try {
+    let employee = await Employee.findById(employeeId).populate('user', 'name email');
+    if (!employee) {
+      employee = await Employee.findOne({ user: employeeId }).populate('user', 'name email');
+    }
+    return employee;
+  } catch (err) {
+    if (err.name === 'CastError') return null;
+    throw err;
+  }
 }
 
 // Get all feedback (HR/Admin view)
@@ -127,11 +175,12 @@ router.post('/', verifyJWT, async (req, res) => {
       reviewer: req.user._id
     });
     
-    // Validate employee exists
-    const employee = await Employee.findById(feedbackData.employee).populate('user', 'name email');
+    // Validate employee exists (accept Employee id or User id)
+    const employee = await resolveEmployee(feedbackData.employee);
     if (!employee) {
       return res.status(400).json({ error: 'Employee not found' });
     }
+    feedbackData.employee = employee._id;
     
     // Calculate overall rating from individual ratings
     if (feedbackData.ratings) {
@@ -181,6 +230,9 @@ router.post('/', verifyJWT, async (req, res) => {
     if (error.name === 'ValidationError') {
       const messages = Object.values(error.errors).map((e) => e.message);
       return res.status(400).json({ error: messages.join(', ') });
+    }
+    if (error.name === 'CastError') {
+      return res.status(400).json({ error: 'Invalid employee or feedback data' });
     }
     res.status(500).json({ error: 'Failed to create feedback' });
   }
