@@ -112,7 +112,7 @@ router.get('/google/callback', (req, res, next) => {
     try {
       const token = jwt.sign(
         { _id: user._id, name: user.name, email: user.email, role: user.role },
-        process.env.JWT_SECRET,
+        process.env.JWT_SECRET || 'fallback-secret',
         { expiresIn: '7d' }
       );
 
@@ -327,7 +327,7 @@ router.get('/me', async (req, res) => {
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret');
     const user = await User.findById(decoded._id).select(
       'name email role isActive isVerified phone position company industry companySize'
     );
