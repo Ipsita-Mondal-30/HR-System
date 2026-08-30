@@ -267,95 +267,65 @@ router.post('/apply-with-resume', verifyJWT, isCandidate, async (req, res) => {
       }
 
       await application.save();
+      await application.populate('job', 'title companyName location');
 
-      // Update user profile with new information if provided
-      const updateData = {};
-      if (phone && !user.phone) updateData.phone = phone;
-      if (location && !user.location) updateData.location = location;
-      if (experience && !user.experience) updateData.experience = experience;
-      if (expectedSalary && !user.expectedSalary) updateData.expectedSalary = expectedSalary;
-      if (resumeUrl && !user.resumeUrl) updateData.resumeUrl = resumeUrl;
+      // Respond immediately — scoring, email, and notifications run in background
+      res.status(201).json({
+        message: 'Application submitted successfully! You will receive a confirmation email shortly.',
+        application,
+      });
 
-      if (Object.keys(updateData).length > 0) {
-        await User.findByIdAndUpdate(user._id, updateData);
-      }
+      setImmediate(async () => {
+        try {
+          const updateData = {};
+          if (phone && !user.phone) updateData.phone = phone;
+          if (location && !user.location) updateData.location = location;
+          if (experience && !user.experience) updateData.experience = experience;
+          if (expectedSalary && !user.expectedSalary) updateData.expectedSalary = expectedSalary;
+          if (resumeUrl && !user.resumeUrl) updateData.resumeUrl = resumeUrl;
+          if (Object.keys(updateData).length > 0) {
+            await User.findByIdAndUpdate(user._id, updateData);
+          }
+        } catch (profileErr) {
+          console.error('Profile update after apply failed:', profileErr.message);
+        }
 
-      // Score application and email HR + candidate (Groq ATS optional, match score always)
-      (async () => {
         try {
           const { runPostApplicationScoring } = require('../services/applicationScoringService');
           await runPostApplicationScoring(application._id, user._id);
         } catch (scoringError) {
           console.error('❌ Post-application scoring failed:', scoringError.message);
         }
-      })();
 
-      // Send confirmation email to candidate
-      try {
-        const { sendEmail } = require('../utils/email');
-        await sendEmail({
-          to: user.email,
-          subject: `Application Submitted: ${job.title} at ${job.companyName}`,
-          html: `
-            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-              <h2 style="color: #2563eb;">Application Submitted Successfully! 🎉</h2>
-              
-              <p>Dear ${user.name},</p>
-              
-              <p>Thank you for applying to <strong>${job.title}</strong> at <strong>${job.companyName}</strong>.</p>
-              
-              <div style="background-color: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                <h3 style="margin-top: 0; color: #374151;">Job Details:</h3>
-                <p><strong>Position:</strong> ${job.title}</p>
-                <p><strong>Company:</strong> ${job.companyName}</p>
-                <p><strong>Location:</strong> ${job.location || 'Not specified'}</p>
-                <p><strong>Department:</strong> ${job.department?.name || 'Not specified'}</p>
+        try {
+          const { sendEmail } = require('../utils/email');
+          await sendEmail({
+            to: user.email,
+            subject: `Application Submitted: ${job.title} at ${job.companyName}`,
+            html: `
+              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #2563eb;">Application Submitted Successfully!</h2>
+                <p>Dear ${user.name},</p>
+                <p>Thank you for applying to <strong>${job.title}</strong> at <strong>${job.companyName}</strong>.</p>
+                <p>You can track your application status in your candidate dashboard.</p>
               </div>
-              
-              <div style="background-color: #fef3c7; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #f59e0b;">
-                <p style="margin: 0;"><strong>⚠️ Important Note:</strong> Our AI system will analyze your application and provide an initial match score. Please note that this score is for preliminary screening only and is not the final decision. The HR team will review all applications thoroughly.</p>
-              </div>
-              
-              <p>What happens next:</p>
-              <ul>
-                <li>Our AI system will analyze your profile and provide a match score</li>
-                <li>HR team will review your application</li>
-                <li>You'll receive updates on your application status</li>
-                <li>If selected, we'll contact you for the next steps</li>
-              </ul>
-              
-              <p>You can track your application status in your candidate dashboard.</p>
-              
-              <p>Best of luck!</p>
-              <p>The ${job.companyName} Hiring Team</p>
-            </div>
-          `
-        });
-      } catch (emailError) {
-        console.error('Email sending failed:', emailError);
-        // Don't fail the application if email fails
-      }
+            `,
+          });
+        } catch (emailError) {
+          console.error('Email sending failed:', emailError.message);
+        }
 
-      // Populate the job details for response
-      await application.populate('job', 'title companyName location');
-
-      // Create notification for job applied
-      try {
-        const notificationService = require('../services/notificationService');
-        await notificationService.notifyJobApplied(
-          user._id,
-          job._id,
-          job.title,
-          job.companyName
-        );
-      } catch (notifError) {
-        console.error('Failed to create notification:', notifError);
-        // Don't fail the application if notification fails
-      }
-
-      res.status(201).json({
-        message: 'Application submitted successfully! You will receive a confirmation email shortly.',
-        application
+        try {
+          const notificationService = require('../services/notificationService');
+          await notificationService.notifyJobApplied(
+            user._id,
+            job._id,
+            job.title,
+            job.companyName
+          );
+        } catch (notifError) {
+          console.error('Failed to create notification:', notifError.message);
+        }
       });
     } catch (err) {
       console.error('Error applying to job:', err);
@@ -423,83 +393,50 @@ router.post('/apply', verifyJWT, isCandidate, async (req, res) => {
     });
 
     await application.save();
+    await application.populate('job', 'title companyName location');
 
-    // Score application and email HR + candidate
-    (async () => {
+    res.status(201).json({
+      message: 'Application submitted successfully! You will receive a confirmation email shortly.',
+      application,
+    });
+
+    setImmediate(async () => {
       try {
         const { runPostApplicationScoring } = require('../services/applicationScoringService');
         await runPostApplicationScoring(application._id, user._id);
       } catch (scoringError) {
         console.error('❌ Post-application scoring failed:', scoringError.message);
       }
-    })();
 
-    // Send confirmation email to candidate
-    try {
-      const { sendEmail } = require('../utils/email');
-      await sendEmail({
-        to: user.email,
-        subject: `Application Submitted: ${job.title} at ${job.companyName}`,
-        html: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-            <h2 style="color: #2563eb;">Application Submitted Successfully! 🎉</h2>
-            
-            <p>Dear ${user.name},</p>
-            
-            <p>Thank you for applying to <strong>${job.title}</strong> at <strong>${job.companyName}</strong>.</p>
-            
-            <div style="background-color: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0;">
-              <h3 style="margin-top: 0; color: #374151;">Job Details:</h3>
-              <p><strong>Position:</strong> ${job.title}</p>
-              <p><strong>Company:</strong> ${job.companyName}</p>
-              <p><strong>Location:</strong> ${job.location || 'Not specified'}</p>
-              <p><strong>Department:</strong> ${job.department?.name || 'Not specified'}</p>
+      try {
+        const { sendEmail } = require('../utils/email');
+        await sendEmail({
+          to: user.email,
+          subject: `Application Submitted: ${job.title} at ${job.companyName}`,
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+              <h2 style="color: #2563eb;">Application Submitted Successfully!</h2>
+              <p>Dear ${user.name},</p>
+              <p>Thank you for applying to <strong>${job.title}</strong> at <strong>${job.companyName}</strong>.</p>
+              <p>You can track your application status in your candidate dashboard.</p>
             </div>
-            
-            <div style="background-color: #fef3c7; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #f59e0b;">
-              <p style="margin: 0;"><strong>⚠️ Important Note:</strong> Our AI system will analyze your application and provide an initial match score. Please note that this score is for preliminary screening only and is not the final decision. The HR team will review all applications thoroughly.</p>
-            </div>
-            
-            <p>What happens next:</p>
-            <ul>
-              <li>Our AI system will analyze your profile and provide a match score</li>
-              <li>HR team will review your application</li>
-              <li>You'll receive updates on your application status</li>
-              <li>If selected, we'll contact you for the next steps</li>
-            </ul>
-            
-            <p>You can track your application status in your candidate dashboard.</p>
-            
-            <p>Best of luck!</p>
-            <p>The ${job.companyName} Hiring Team</p>
-          </div>
-        `
-      });
-    } catch (emailError) {
-      console.error('Email sending failed:', emailError);
-      // Don't fail the application if email fails
-    }
+          `,
+        });
+      } catch (emailError) {
+        console.error('Email sending failed:', emailError.message);
+      }
 
-    // Populate the job details for response
-    await application.populate('job', 'title companyName location');
-
-    // Create notification for job applied
-    try {
-      const notificationService = require('../services/notificationService');
-      await notificationService.notifyJobApplied(
-        user._id,
-        job._id,
-        job.title,
-        job.companyName
-      );
-    } catch (notifError) {
-      console.error('Failed to create notification:', notifError);
-      // Don't fail the application if notification fails
-    }
-
-    res.status(201).json({
-      message: 'Application submitted successfully! You will receive a confirmation email shortly.',
-      application
+      try {
+        const notificationService = require('../services/notificationService');
+        await notificationService.notifyJobApplied(
+          user._id,
+          job._id,
+          job.title,
+          job.companyName
+        );
+      } catch (notifError) {
+        console.error('Failed to create notification:', notifError.message);
+      }
     });
   } catch (err) {
     console.error('Error applying to job:', err);

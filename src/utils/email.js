@@ -23,7 +23,12 @@ const sendEmail = async ({ to, subject, html }) => {
   };
 
   try {
-    const info = await transporter.sendMail(mailOptions);
+    const info = await Promise.race([
+      transporter.sendMail(mailOptions),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Email send timed out after 12s')), 12000)
+      ),
+    ]);
     console.log(`✅ Email sent successfully to: ${to}`, info.messageId);
     return info;
   } catch (error) {
