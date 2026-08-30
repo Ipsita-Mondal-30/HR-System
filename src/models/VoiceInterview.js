@@ -15,11 +15,14 @@ const voiceInterviewSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  companyName: String,
+  jobDescription: String,
   skills: [String],
   questions: [{
     question: String,
     transcript: String,
     answer: String,
+    reason: String,
     evaluation: {
       type: String,
       enum: ['correct', 'partial', 'incorrect']
@@ -64,6 +67,15 @@ const voiceInterviewSchema = new mongoose.Schema({
     strengths: [String],
     improvements: [String],
     recommendations: [String],
+    actionPlan: [String],
+    skillsDemonstrated: [String],
+    skillsToPractice: [String],
+    questionFeedback: [{
+      question: String,
+      whatWentWell: String,
+      whatToImprove: String,
+      betterAnswer: String,
+    }],
     detailedFeedback: String,
     summary: String,
     resources: [{ title: String, url: String, type: String }],

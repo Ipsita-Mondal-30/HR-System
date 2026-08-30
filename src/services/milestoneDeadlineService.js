@@ -1,7 +1,7 @@
 const Milestone = require('../models/Milestone');
 const Employee = require('../models/Employee');
 const Project = require('../models/Project');
-const emailService = require('./emailService');
+const { sendEmailSafe } = require('../utils/email');
 
 const NEAR_DEADLINE_DAYS = 2;
 
@@ -33,14 +33,12 @@ async function sendMilestoneReminderEmail(employee, milestone, project, type) {
   `;
 
   try {
-    if (!emailService.transporter) return false;
-    await emailService.transporter.sendMail({
-      from: `"Talora Projects" <${process.env.EMAIL_USER}>`,
+    return sendEmailSafe({
       to: user.email,
       subject,
       html,
+      fromName: 'Talora Projects',
     });
-    return true;
   } catch (err) {
     console.warn('Milestone reminder email failed:', err.message);
     return false;

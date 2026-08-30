@@ -1,8 +1,9 @@
 const Application = require('../models/Application');
+const User = require('../models/User');
 const ResumeAnalysisHistory = require('../models/ResumeAnalysisHistory');
-const { parseResumeFromSource, extractTextFromPdf } = require('./resumeParseService');
+const { parseResumeFromSource, parseResumeFields, extractTextFromPdf } = require('./resumeParseService');
 const { analyzeResumeWithGroq } = require('./groqAtsService');
-const { sendEmail } = require('../utils/email');
+const { sendEmailSafe } = require('../utils/email');
 
 function buildAnalysisEmailHtml({ candidateName, jobTitle, companyName, scores, missingSkills, strengths }) {
   return `
@@ -42,23 +43,97 @@ async function sendAnalysisEmails({ application, job, scores, analysis }) {
   const sends = [];
   if (candidateEmail) {
     sends.push(
-      sendEmail({
+      sendEmailSafe({
         to: candidateEmail,
         subject: `Resume Analysis: ${jobTitle}${companyName ? ` @ ${companyName}` : ''}`,
         html,
-      }).catch((err) => console.error('Candidate analysis email failed:', err.message))
+      })
     );
   }
   if (hrEmail && hrEmail !== candidateEmail) {
     sends.push(
-      sendEmail({
+      sendEmailSafe({
         to: hrEmail,
         subject: `Candidate Resume Analysis: ${candidateName} — ${jobTitle}`,
         html: html.replace('Your resume was analyzed', `${candidateName}'s resume was analyzed`),
-      }).catch((err) => console.error('HR analysis email failed:', err.message))
+      })
     );
   }
   await Promise.all(sends);
+}
+
+function looksLikeProfileStub(text) {
+  const t = String(text || '').trim();
+  if (!t) return true;
+  if (t.length < 80) return true;
+  return /Why interested:/i.test(t) && /^(Name:|Skills:)/i.test(t);
+}
+
+function profileToText(user) {
+  if (!user) return '';
+  return [
+    user.name && `Name: ${user.name}`,
+    user.email && `Email: ${user.email}`,
+    user.phone && `Phone: ${user.phone}`,
+    user.location && `Location: ${user.location}`,
+    user.experience && `Experience: ${user.experience}`,
+    user.skills?.length && `Skills: ${user.skills.join(', ')}`,
+    user.bio && `Bio: ${user.bio}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+async function tryParsePdfUrl(url) {
+  if (!url || typeof url !== 'string' || !url.startsWith('http')) return null;
+  try {
+    const parsed = await parseResumeFromSource(url);
+    if (parsed.resumeText && parsed.resumeText.length > 40) {
+      return { ...parsed, resumeUrl: url };
+    }
+  } catch (err) {
+    console.warn('Resume PDF parse failed:', url, err.message);
+  }
+  return null;
+}
+
+async function resolveResumeForAnalysis(application) {
+  const urls = [application.resumeUrl, application.resumeFile?.url].filter(Boolean);
+  for (const url of [...new Set(urls)]) {
+    const fromPdf = await tryParsePdfUrl(url);
+    if (fromPdf) return fromPdf;
+  }
+
+  const ownerId = application.candidate?._id || application.candidate || application.user;
+  const user = ownerId ? await User.findById(ownerId) : null;
+  const fromProfilePdf = await tryParsePdfUrl(user?.resumeUrl);
+  if (fromProfilePdf) return fromProfilePdf;
+
+  const storedText = String(application.resumeText || '').trim();
+  if (storedText && !looksLikeProfileStub(storedText)) {
+    return {
+      resumeText: storedText,
+      parsedResume: await parseResumeFields(storedText),
+      resumeUrl: application.resumeUrl || application.resumeFile?.url || '',
+    };
+  }
+
+  const fallbackText = [storedText, profileToText(user), application.coverLetter]
+    .filter(Boolean)
+    .join('\n')
+    .trim();
+
+  if (fallbackText.length >= 20) {
+    return {
+      resumeText: fallbackText,
+      parsedResume: await parseResumeFields(fallbackText),
+      resumeUrl: application.resumeUrl || application.resumeFile?.url || user?.resumeUrl || '',
+    };
+  }
+
+  throw new Error(
+    'No resume found for this application. Upload a PDF resume on the candidate profile or when applying, then try again.'
+  );
 }
 
 async function persistAnalysis({
@@ -112,35 +187,44 @@ async function persistAnalysis({
     interviewTips: analysis.wordingSuggestions || [],
     projectEnhancements: analysis.projectEnhancements || [],
     analyzedAt: analysis.analyzedAt,
-    source: 'groq',
+    source: analysis.source || 'groq',
   };
   await application.save();
 
-  const history = await ResumeAnalysisHistory.create({
-    application: application._id,
-    candidate: application.candidate,
-    createdBy,
-    resumeUrl: resumeUrl || application.resumeUrl,
-    resumeFileName: resumeFileName || application.resumeFile?.originalName,
-    resumeSizeBytes: resumeSizeBytes || application.resumeFile?.sizeBytes,
-    jobDescriptionText,
-    jobDescriptionSource,
-    jobTitle: job?.title,
-    companyName: job?.companyName,
-    parsedResume,
-    scores,
-    missingSkills: analysis.missingSkills,
-    strengths: analysis.strengths,
-    weaknesses: analysis.weaknesses,
-    recommendations: analysis.recommendations,
-    bulletImprovements: analysis.bulletImprovements,
-    wordingSuggestions: analysis.wordingSuggestions,
-    projectEnhancements: analysis.projectEnhancements,
-    source: 'groq',
-  });
+  let history = null;
+  try {
+    history = await ResumeAnalysisHistory.create({
+      application: application._id,
+      candidate: application.candidate,
+      createdBy,
+      resumeUrl: resumeUrl || application.resumeUrl,
+      resumeFileName: resumeFileName || application.resumeFile?.originalName,
+      resumeSizeBytes: resumeSizeBytes || application.resumeFile?.sizeBytes,
+      jobDescriptionText,
+      jobDescriptionSource,
+      jobTitle: job?.title,
+      companyName: job?.companyName,
+      parsedResume,
+      scores,
+      missingSkills: analysis.missingSkills,
+      strengths: analysis.strengths,
+      weaknesses: analysis.weaknesses,
+      recommendations: analysis.recommendations,
+      bulletImprovements: analysis.bulletImprovements,
+      wordingSuggestions: analysis.wordingSuggestions,
+      projectEnhancements: analysis.projectEnhancements,
+      source: analysis.source || 'groq',
+    });
+  } catch (historyErr) {
+    console.error('Failed to save analysis history:', historyErr.message);
+  }
 
   if (sendEmails && job) {
-    await sendAnalysisEmails({ application, job, scores, analysis });
+    setImmediate(() => {
+      sendAnalysisEmails({ application, job, scores, analysis }).catch((err) =>
+        console.error('Analysis emails failed:', err.message)
+      );
+    });
   }
 
   return { application, history, scores, analysis };
@@ -160,17 +244,13 @@ async function analyzeApplicationById(applicationId, { createdBy, sendEmails = t
   const jobDescriptionText =
     application.jobDescriptionText || job?.description || job?.title || 'General role';
 
-  if (!application.resumeUrl) {
-    throw new Error('No resume found for this application');
-  }
-
-  const { resumeText, parsedResume } = await parseResumeFromSource(application.resumeUrl);
+  const { resumeText, parsedResume, resumeUrl } = await resolveResumeForAnalysis(application);
   const analysis = await analyzeResumeWithGroq({ resumeText, jobDescription: jobDescriptionText });
 
   return persistAnalysis({
     application,
     job,
-    resumeUrl: application.resumeUrl,
+    resumeUrl: resumeUrl || application.resumeUrl,
     resumeFileName: application.resumeFile?.originalName,
     resumeSizeBytes: application.resumeFile?.sizeBytes,
     jobDescriptionText,
@@ -201,7 +281,15 @@ async function analyzeUploadedResume({
     throw new Error('Job description is required');
   }
 
-  const { resumeText, parsedResume } = await parseResumeFromSource(resumeSource);
+  let resumeText;
+  let parsedResume;
+  try {
+    ({ resumeText, parsedResume } = await parseResumeFromSource(resumeSource));
+  } catch (err) {
+    throw new Error(
+      `Could not read the resume PDF (${err.message}). Use a text-based PDF (not a scanned image).`
+    );
+  }
   const analysis = await analyzeResumeWithGroq({
     resumeText,
     jobDescription: jobDescriptionText,
@@ -260,7 +348,7 @@ async function analyzeUploadedResume({
     bulletImprovements: analysis.bulletImprovements,
     wordingSuggestions: analysis.wordingSuggestions,
     projectEnhancements: analysis.projectEnhancements,
-    source: 'groq',
+    source: analysis.source || 'groq',
   });
 
   return { history, scores: history.scores, analysis, parsedResume, resumeText };

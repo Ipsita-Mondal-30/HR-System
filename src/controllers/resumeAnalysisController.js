@@ -1,4 +1,5 @@
 const Application = require('../models/Application');
+const User = require('../models/User');
 const ResumeAnalysisHistory = require('../models/ResumeAnalysisHistory');
 const {
   analyzeApplicationById,
@@ -7,9 +8,92 @@ const {
   extractJobDescriptionFromPdf,
 } = require('../services/applicationAnalysisService');
 const { rewriteResumeBullets, generateCoverLetter } = require('../services/resumeEnhancementService');
+const { extractTextFromPdf } = require('../services/resumeParseService');
 const { validateResumeFile } = require('../utils/resumeValidation');
 const { uploadPdfBuffer } = require('../utils/cloudinaryUpload');
 const resumeUpload = require('../middleware/resumeAnalysisUpload');
+
+function requestUserId(req) {
+  return String(req.user?._id || req.user?.id || '');
+}
+
+function idString(value) {
+  if (!value) return '';
+  if (value._id) return String(value._id);
+  return String(value);
+}
+
+function looksLikeProfileStub(text) {
+  const t = String(text || '').trim();
+  if (!t) return true;
+  if (t.length < 80) return true;
+  return /Why interested:/i.test(t) && /^(Name:|Skills:)/i.test(t);
+}
+
+function parsedResumeToText(parsed) {
+  if (!parsed) return '';
+  return [
+    parsed.name && `Name: ${parsed.name}`,
+    parsed.email && `Email: ${parsed.email}`,
+    parsed.skills?.length && `Skills: ${parsed.skills.join(', ')}`,
+    parsed.experience?.length && `Experience:\n${parsed.experience.join('\n')}`,
+    parsed.projects?.length && `Projects:\n${parsed.projects.join('\n')}`,
+    parsed.education?.length && `Education:\n${parsed.education.join('\n')}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+function profileToText(user) {
+  if (!user) return '';
+  return [
+    user.name && `Name: ${user.name}`,
+    user.email && `Email: ${user.email}`,
+    user.phone && `Phone: ${user.phone}`,
+    user.location && `Location: ${user.location}`,
+    user.experience && `Experience: ${user.experience}`,
+    user.skills?.length && `Skills: ${user.skills.join(', ')}`,
+    user.bio && `Bio: ${user.bio}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+async function tryExtractResume(url) {
+  if (!url || typeof url !== 'string' || !url.startsWith('http')) return '';
+  try {
+    const text = await extractTextFromPdf(url);
+    return String(text || '').trim();
+  } catch (err) {
+    console.warn('Cover letter resume PDF parse failed:', err.message);
+    return '';
+  }
+}
+
+async function resolveCoverLetterResume(application) {
+  const pdfUrl = application.resumeUrl || application.resumeFile?.url;
+  const fromPdf = await tryExtractResume(pdfUrl);
+  if (fromPdf.length > 50) {
+    if (!application.resumeText || looksLikeProfileStub(application.resumeText)) {
+      application.resumeText = fromPdf.slice(0, 15000);
+    }
+    return fromPdf;
+  }
+
+  const parsed = parsedResumeToText(application.parsedResume);
+  if (parsed.length > 40) return parsed;
+
+  if (application.resumeText && !looksLikeProfileStub(application.resumeText)) {
+    return application.resumeText;
+  }
+
+  const ownerId = idString(application.candidate) || idString(application.user);
+  const user = ownerId ? await User.findById(ownerId) : null;
+  const fromProfilePdf = await tryExtractResume(user?.resumeUrl);
+  if (fromProfilePdf.length > 50) return fromProfilePdf;
+
+  return [application.resumeText, profileToText(user)].filter(Boolean).join('\n').trim();
+}
 
 function handleUpload(req, res, next) {
   resumeUpload.fields([
@@ -60,7 +144,12 @@ exports.analyzeResume = [
         return res.status(400).json({ error: 'Job description is required (paste text or upload PDF)' });
       }
 
-      const resumeUrl = await uploadPdfBuffer(resumeFile.buffer, 'resumes', resumeFile.originalname);
+      let resumeUrl = '';
+      try {
+        resumeUrl = await uploadPdfBuffer(resumeFile.buffer, 'resumes', resumeFile.originalname);
+      } catch (uploadErr) {
+        console.warn('Resume Cloudinary upload skipped:', uploadErr.message);
+      }
 
       const result = await analyzeUploadedResume({
         resumeSource: resumeFile.buffer,
@@ -83,7 +172,12 @@ exports.analyzeResume = [
       });
     } catch (error) {
       console.error('Resume analysis failed:', error);
-      res.status(500).json({ error: error.message || 'Resume analysis failed' });
+      const message = error.message || 'Resume analysis failed';
+      const status =
+        /GROQ_API_KEY|not configured|invalid or missing/i.test(message) ? 503 :
+        /model not available|GROQ_MODEL/i.test(message) ? 503 :
+        500;
+      res.status(status).json({ error: message });
     }
   },
 ];
@@ -97,7 +191,13 @@ exports.analyzeApplication = async (req, res) => {
     res.json({ message: 'Application analyzed successfully', ...result });
   } catch (error) {
     console.error('Application analysis failed:', error);
-    res.status(500).json({ error: error.message || 'Application analysis failed' });
+    const message = error.message || 'Application analysis failed';
+    const status =
+      /not found/i.test(message) ? 404 :
+      /No resume found/i.test(message) ? 400 :
+      /GROQ_API_KEY|not configured|invalid or missing/i.test(message) ? 503 :
+      500;
+    res.status(status).json({ error: message });
   }
 };
 
@@ -176,17 +276,32 @@ exports.generateCoverLetter = async (req, res) => {
     }
 
     if (req.user?.role === 'candidate') {
-      const candidateId = req.user._id?.toString();
-      const ownerId = application.candidate?.toString() || application.user?.toString();
-      if (ownerId !== candidateId) {
+      const candidateId = requestUserId(req);
+      const ownerIds = [application.candidate, application.user].map(idString).filter(Boolean);
+      const emailMatch =
+        req.user.email &&
+        application.email &&
+        String(req.user.email).toLowerCase() === String(application.email).toLowerCase();
+      if (ownerIds.length && candidateId && !ownerIds.includes(candidateId) && !emailMatch) {
         return res.status(403).json({ error: 'Access denied' });
       }
     }
 
+    const resumeText = await resolveCoverLetterResume(application);
+    const jobDescription =
+      application.jobDescriptionText || application.job?.description || application.job?.title || '';
+
+    if (!resumeText) {
+      return res.status(400).json({
+        error:
+          'No resume found for this application. Upload a PDF resume on your profile or when applying, then try again.',
+      });
+    }
+
     const coverLetter = await generateCoverLetter({
       candidateName: application.name,
-      resumeText: application.resumeText || '',
-      jobDescription: application.jobDescriptionText || application.job?.description || '',
+      resumeText,
+      jobDescription,
       jobTitle: application.job?.title,
       companyName: application.job?.companyName,
     });

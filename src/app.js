@@ -10,12 +10,18 @@ const cookieParser = require('cookie-parser');
 const fs = require('fs');
 const path = require('path');
 
-// Load environment variables early
+// Load environment variables early from hr-backend/, not process.cwd()
 (() => {
   try {
-    dotenv.config();
-    const envLocalBackend = path.join(__dirname, '../.env.local');
+    const envDir = path.join(__dirname, '..');
+    const envFile = path.join(envDir, '.env');
+    const envLocalBackend = path.join(envDir, '.env.local');
     const envLocalRoot = path.join(__dirname, '../../.env.local');
+    if (fs.existsSync(envFile)) {
+      dotenv.config({ path: envFile });
+    } else {
+      dotenv.config();
+    }
     if (fs.existsSync(envLocalBackend)) {
       dotenv.config({ path: envLocalBackend, override: true });
     } else if (fs.existsSync(envLocalRoot)) {
@@ -327,6 +333,12 @@ async function startServer() {
       console.log('🔗 Connected to MongoDB');
       console.log(`📊 Database: ${mongoose.connection.db.databaseName}`);
       console.log('🔌 WebSocket (project chat) enabled');
+      const { isMailConfigured, getMailConfig } = require('./utils/email');
+      if (isMailConfigured()) {
+        console.log(`📧 Nodemailer configured for ${getMailConfig().user}`);
+      } else {
+        console.warn('⚠️ Nodemailer not configured — set EMAIL_USER and EMAIL_PASSWORD in hr-backend/.env');
+      }
 
       const { checkAndNotifyMilestoneDeadlines } = require('./services/milestoneDeadlineService');
       checkAndNotifyMilestoneDeadlines().catch(() => {});

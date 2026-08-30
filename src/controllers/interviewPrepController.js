@@ -4,7 +4,7 @@ const Job = require('../models/Job');
 const User = require('../models/User');
 const { transcribeMultiple } = require('../services/assemblyAIService');
 const { generateInterviewFeedback } = require('../services/cohereService');
-const { sendEmail } = require('../services/emailService');
+const { sendEmailSafe } = require('../utils/email');
 
 /**
  * Get jobs that candidate has applied to (for interview prep selection)
@@ -207,13 +207,16 @@ async function processInterviewFeedback(feedbackId, recordings, job, user) {
       completedAt: new Date()
     });
 
-    // Step 4: Send email with feedback
+    // Step 4: Send email with feedback (do not mark the session failed if mail fails)
     console.log('📧 Sending feedback email...');
-    await sendFeedbackEmail(user, job, aiFeedback);
-
-    await InterviewFeedback.findByIdAndUpdate(feedbackId, {
-      emailSent: true
-    });
+    try {
+      await sendFeedbackEmail(user, job, aiFeedback);
+      await InterviewFeedback.findByIdAndUpdate(feedbackId, {
+        emailSent: true,
+      });
+    } catch (emailErr) {
+      console.error('📧 Interview feedback email failed:', emailErr.message);
+    }
 
     console.log('✅ Interview feedback processing completed');
   } catch (error) {
@@ -230,6 +233,10 @@ async function processInterviewFeedback(feedbackId, recordings, job, user) {
  * Send feedback email to candidate
  */
 async function sendFeedbackEmail(user, job, feedback) {
+  if (!user?.email) {
+    console.warn('⚠️ Cannot send interview feedback — user has no email');
+    return false;
+  }
   const emailHtml = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
       <h2 style="color: #2563eb;">Your Interview Practice Feedback 🎯</h2>
@@ -289,10 +296,11 @@ async function sendFeedbackEmail(user, job, feedback) {
     </div>
   `;
 
-  await sendEmail({
+  return sendEmailSafe({
     to: user.email,
     subject: `Your Interview Prep Feedback - ${job.title}`,
-    html: emailHtml
+    html: emailHtml,
+    fromName: 'Talora Interview Prep',
   });
 }
 

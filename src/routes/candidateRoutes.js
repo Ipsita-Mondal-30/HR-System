@@ -277,6 +277,28 @@ router.post('/apply-with-resume', verifyJWT, isCandidate, async (req, res) => {
 
       setImmediate(async () => {
         try {
+          const { sendEmailSafe } = require('../utils/email');
+          const sent = await sendEmailSafe({
+            to: user.email,
+            subject: `Application Submitted: ${job.title} at ${job.companyName}`,
+            html: `
+              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #2563eb;">Application Submitted Successfully!</h2>
+                <p>Dear ${user.name},</p>
+                <p>Thank you for applying to <strong>${job.title}</strong> at <strong>${job.companyName}</strong>.</p>
+                <p>You can track your application status in your candidate dashboard.</p>
+                <p>You will receive a separate email with your AI match score once analysis completes.</p>
+              </div>
+            `,
+          });
+          if (!sent) {
+            console.error('Application confirmation email was not sent to:', user.email);
+          }
+        } catch (emailError) {
+          console.error('Email sending failed:', emailError.message);
+        }
+
+        try {
           const updateData = {};
           if (phone && !user.phone) updateData.phone = phone;
           if (location && !user.location) updateData.location = location;
@@ -295,24 +317,6 @@ router.post('/apply-with-resume', verifyJWT, isCandidate, async (req, res) => {
           await runPostApplicationScoring(application._id, user._id);
         } catch (scoringError) {
           console.error('❌ Post-application scoring failed:', scoringError.message);
-        }
-
-        try {
-          const { sendEmail } = require('../utils/email');
-          await sendEmail({
-            to: user.email,
-            subject: `Application Submitted: ${job.title} at ${job.companyName}`,
-            html: `
-              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                <h2 style="color: #2563eb;">Application Submitted Successfully!</h2>
-                <p>Dear ${user.name},</p>
-                <p>Thank you for applying to <strong>${job.title}</strong> at <strong>${job.companyName}</strong>.</p>
-                <p>You can track your application status in your candidate dashboard.</p>
-              </div>
-            `,
-          });
-        } catch (emailError) {
-          console.error('Email sending failed:', emailError.message);
         }
 
         try {
@@ -402,15 +406,8 @@ router.post('/apply', verifyJWT, isCandidate, async (req, res) => {
 
     setImmediate(async () => {
       try {
-        const { runPostApplicationScoring } = require('../services/applicationScoringService');
-        await runPostApplicationScoring(application._id, user._id);
-      } catch (scoringError) {
-        console.error('❌ Post-application scoring failed:', scoringError.message);
-      }
-
-      try {
-        const { sendEmail } = require('../utils/email');
-        await sendEmail({
+        const { sendEmailSafe } = require('../utils/email');
+        const sent = await sendEmailSafe({
           to: user.email,
           subject: `Application Submitted: ${job.title} at ${job.companyName}`,
           html: `
@@ -419,11 +416,22 @@ router.post('/apply', verifyJWT, isCandidate, async (req, res) => {
               <p>Dear ${user.name},</p>
               <p>Thank you for applying to <strong>${job.title}</strong> at <strong>${job.companyName}</strong>.</p>
               <p>You can track your application status in your candidate dashboard.</p>
+              <p>You will receive a separate email with your AI match score once analysis completes.</p>
             </div>
           `,
         });
+        if (!sent) {
+          console.error('Application confirmation email was not sent to:', user.email);
+        }
       } catch (emailError) {
         console.error('Email sending failed:', emailError.message);
+      }
+
+      try {
+        const { runPostApplicationScoring } = require('../services/applicationScoringService');
+        await runPostApplicationScoring(application._id, user._id);
+      } catch (scoringError) {
+        console.error('❌ Post-application scoring failed:', scoringError.message);
       }
 
       try {

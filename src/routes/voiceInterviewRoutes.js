@@ -25,19 +25,35 @@ router.get('/all-jobs', verifyJWT, async (req, res) => {
   }
 });
 
+function jobContextFrom(session, job) {
+  const j = job && typeof job === 'object' ? job : session.job;
+  return {
+    title: session.jobRole || j?.title || 'this role',
+    companyName: session.companyName || j?.companyName || '',
+    description: session.jobDescription || j?.description || '',
+    skills: (session.skills && session.skills.length ? session.skills : j?.skills) || [],
+    experienceRequired: j?.experienceRequired,
+  };
+}
+
 // Start voice interview session
 router.post('/start', verifyJWT, async (req, res) => {
   try {
     const { jobId, jobRole, skills = [] } = req.body;
-    
-    console.log('🎙️ Starting voice interview for:', jobRole);
 
-    // Create session
+    const job = jobId ? await Job.findById(jobId).select('title companyName description skills experienceRequired') : null;
+    const resolvedRole = job?.title || jobRole;
+    const resolvedSkills = (Array.isArray(skills) && skills.length ? skills : job?.skills) || [];
+
+    console.log('🎙️ Starting voice interview for:', resolvedRole);
+
     const session = new VoiceInterview({
       candidate: req.user._id,
       job: jobId,
-      jobRole,
-      skills,
+      jobRole: resolvedRole,
+      companyName: job?.companyName || '',
+      jobDescription: String(job?.description || '').slice(0, 4000),
+      skills: resolvedSkills,
       questions: [],
       askedCount: 0,
       maxQuestions: 6,
@@ -46,9 +62,13 @@ router.post('/start', verifyJWT, async (req, res) => {
 
     await session.save();
 
-    // Generate first question (easy) - pass sessionId for tracking
     const sessionId = session._id.toString();
-    const firstQuestion = await geminiService.generateFirstQuestion(jobRole, skills, sessionId);
+    const firstQuestion = await geminiService.generateFirstQuestion(
+      resolvedRole,
+      resolvedSkills,
+      sessionId,
+      jobContextFrom(session, job)
+    );
 
     session.questions.push({
       question: firstQuestion,
@@ -62,7 +82,9 @@ router.post('/start', verifyJWT, async (req, res) => {
 
     res.json({
       sessionId: session._id,
-      firstQuestion
+      firstQuestion,
+      jobRole: resolvedRole,
+      companyName: job?.companyName || '',
     });
   } catch (error) {
     console.error('❌ Error starting interview:', error);
@@ -106,11 +128,16 @@ function buildFinalResults(session, analysis, score, status, emailSent) {
   return {
     sessionId: session._id.toString(),
     jobRole: session.jobRole,
+    companyName: session.companyName || session.job?.companyName || '',
     prepScore: score,
     status,
     strengths: analysis.strengths || [],
     weaknesses: analysis.improvements || [],
     improvementTips: analysis.recommendations || [],
+    actionPlan: analysis.actionPlan || analysis.recommendations || [],
+    skillsDemonstrated: analysis.skillsDemonstrated || [],
+    skillsToPractice: analysis.skillsToPractice || [],
+    questionFeedback: analysis.questionFeedback || [],
     summary: analysis.summary || analysis.detailedFeedback || '',
     resources: analysis.resources || [],
     courses: analysis.courses || [],
@@ -119,6 +146,7 @@ function buildFinalResults(session, analysis, score, status, emailSent) {
       question: q.question,
       answer: q.transcript || q.answer || '',
       evaluation: q.evaluation,
+      reason: q.reason,
     })),
     completedAt: session.completedAt,
     emailSent,
@@ -127,6 +155,10 @@ function buildFinalResults(session, analysis, score, status, emailSent) {
 
 async function sendInterviewEmail(session, user, analysis, score, status) {
   try {
+    if (!user?.email) {
+      console.warn('⚠️ Cannot send interview email — user has no email');
+      return false;
+    }
     const sent = await emailService.sendVoiceInterviewFeedback(
       user.email,
       user.name,
@@ -137,7 +169,16 @@ async function sendInterviewEmail(session, user, analysis, score, status) {
       analysis.improvements || [],
       analysis.recommendations || [],
       analysis.resources || [],
-      analysis.courses || []
+      analysis.courses || [],
+      {
+        summary: analysis.summary || analysis.detailedFeedback || '',
+        actionPlan: analysis.actionPlan || [],
+        skillsToPractice: analysis.skillsToPractice || [],
+        skillsDemonstrated: analysis.skillsDemonstrated || [],
+        questionFeedback: analysis.questionFeedback || [],
+        questions: session.questions || [],
+        companyName: session.companyName || '',
+      }
     );
     if (sent) {
       session.emailSent = true;
@@ -183,7 +224,10 @@ router.post('/answer/:sessionId', verifyJWT, async (req, res) => {
 
     console.log('🎤 Processing answer for session:', sessionId);
 
-    const session = await VoiceInterview.findById(sessionId);
+    const session = await VoiceInterview.findById(sessionId).populate(
+      'job',
+      'title companyName description skills experienceRequired'
+    );
     if (!session) {
       return res.status(404).json({ error: 'Session not found', needsRepetition: true });
     }
@@ -205,6 +249,9 @@ router.post('/answer/:sessionId', verifyJWT, async (req, res) => {
     // Store evaluation and penalty
     session.questions[currentIdx].evaluation = evalResult.evaluation;
     session.questions[currentIdx].penalty = evalResult.penalty || 10;
+    if (evalResult.reason) {
+      session.questions[currentIdx].reason = evalResult.reason;
+    }
     await session.save();
 
     // Check if interview should end
@@ -228,7 +275,7 @@ router.post('/answer/:sessionId', verifyJWT, async (req, res) => {
         session.questions,
         fullTranscript,
         sessionIdStr,
-        bodyLanguageData // Pass body language data for optional gentle feedback
+        jobContextFrom(session, session.job)
       );
 
       session.fullTranscript = fullTranscript;
@@ -314,11 +361,12 @@ router.post('/answer/:sessionId', verifyJWT, async (req, res) => {
       const nextQuestion = await geminiService.decideNextQuestion(
         session.jobRole,
         session.skills || [],
-        adjustedEvaluation, // Use adjusted evaluation based on confidence and body language
+        adjustedEvaluation,
         session.askedCount,
         sessionIdStr,
         previousQuestions,
-        previousAnswer // Pass previous answer for conversational flow
+        previousAnswer,
+        jobContextFrom(session, session.job)
       );
 
       session.questions.push({

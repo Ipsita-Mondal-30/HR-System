@@ -287,14 +287,17 @@ router.post('/answer-v2/:sessionId', verifyJWT, async (req, res) => {
       const improvement_tips = analysis.recommendations || [];
       const email_body = `Hi ${req.user.name},\n\nThank you for completing the ${session.jobRole} interview prep.\n\nPrep Score: ${score}/100\n\nStrengths:\n- ${strengths.join('\n- ')}\n\nWeak Areas:\n- ${weaknesses.join('\n- ')}\n\nSuggestions:\n- ${improvement_tips.join('\n- ')}\n\nKeep practicing and feel free to retry the mock interview.\n\nBest,\nTalora Team`;
       const closing = 'Thank you. This concludes the mock interview.';
-      const { sendEmail } = require('../utils/email');
+      const { sendEmailSafe } = require('../utils/email');
       try {
-        await sendEmail({
+        await sendEmailSafe({
           to: req.user.email,
           subject: `Interview Prep Feedback – ${session.jobRole}`,
-          html: email_body.replace(/\n/g, '<br>')
+          html: email_body.replace(/\n/g, '<br>'),
+          fromName: 'Talora Interview Prep',
         });
-      } catch {}
+      } catch (emailErr) {
+        console.error('Video interview email failed:', emailErr.message);
+      }
       return res.json({
         spoken_text: closing,
         end_interview: true,

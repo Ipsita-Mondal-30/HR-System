@@ -20,6 +20,22 @@ async function extractTextFromPdf(source) {
   return (parsed.text || '').trim();
 }
 
+function asStringArray(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      if (typeof item === 'string') return item.trim();
+      if (item && typeof item === 'object') {
+        return [item.degree, item.school, item.title, item.company, item.name, item.description]
+          .filter(Boolean)
+          .join(' — ')
+          .trim();
+      }
+      return String(item || '').trim();
+    })
+    .filter(Boolean);
+}
+
 async function parseResumeFields(resumeText) {
   if (!resumeText || resumeText.length < 20) {
     return {
@@ -56,13 +72,13 @@ ${resumeText.slice(0, 12000)}`;
   try {
     const data = await callGroqJson(prompt);
     return {
-      name: data.name || '',
-      email: data.email || '',
-      phone: data.phone || '',
-      skills: Array.isArray(data.skills) ? data.skills : [],
-      education: Array.isArray(data.education) ? data.education : [],
-      projects: Array.isArray(data.projects) ? data.projects : [],
-      experience: Array.isArray(data.experience) ? data.experience : [],
+      name: typeof data.name === 'string' ? data.name : '',
+      email: typeof data.email === 'string' ? data.email : '',
+      phone: typeof data.phone === 'string' ? data.phone : '',
+      skills: asStringArray(data.skills),
+      education: asStringArray(data.education),
+      projects: Array.isArray(data.projects) ? asStringArray(data.projects) : [],
+      experience: asStringArray(data.experience),
     };
   } catch (error) {
     console.warn('Groq resume parsing failed, using regex fallback:', error.message);
@@ -87,6 +103,9 @@ function regexParseResume(text) {
 
 async function parseResumeFromSource(source) {
   const resumeText = await extractTextFromPdf(source);
+  if (!resumeText) {
+    throw new Error('Could not extract text from the resume PDF');
+  }
   const parsedResume = await parseResumeFields(resumeText);
   return { resumeText, parsedResume };
 }
