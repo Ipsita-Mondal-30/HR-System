@@ -6,10 +6,10 @@
     "node": ">=18"
   },
   "scripts": {
-    "dev": "nodemon --exec babel-node src/server/server.js",
-    "build": "babel src --out-dir dist --copy-files",
+    "dev": "node init && nodemon --exec babel-node src/server/server.js",
+    "build": "node init && babel src --out-dir dist --copy-files",
     "prestart": "node -e \"require('fs').accessSync('dist/server/server.js')\" || npm run build",
-    "start": "node dist/server/server.js",
+    "start": "node init && node dist/server/server.js",
     "test-server": "node test-server.js",
     "seed": "node reset-and-seed.js",
     "test:gemini": "node ../test-gemini-service.js"
