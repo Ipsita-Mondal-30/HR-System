@@ -96,8 +96,12 @@ router.get('/google', (req, res, next) => {
 
 // --- Google OAuth callback ---
 router.get('/google/callback', (req, res, next) => {
-  passport.authenticate('google', { session: false }, (err, user, info) => {
-    const frontendUrl = resolveFrontendUrl(req);
+  const frontendUrl = resolveFrontendUrl(req);
+  const headerCallback = req.get('x-oauth-redirect-uri');
+  const backendOrigin = (process.env.BASE_URL || 'https://hr-system-x2uf.onrender.com').replace(/\/$/, '');
+  const callbackURL = headerCallback || `${backendOrigin}/api/auth/google/callback`;
+
+  passport.authenticate('google', { session: false, callbackURL }, (err, user, info) => {
 
     if (err) {
       console.error('❌ OAuth authentication error:', err);
