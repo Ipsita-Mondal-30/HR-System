@@ -9,6 +9,26 @@ function getBackendOrigin() {
   }
 }
 
+function allowedFrontendHosts() {
+  const hosts = new Set(['hr-frontend-54b2.vercel.app', 'localhost', '127.0.0.1']);
+  for (const raw of [process.env.FRONTEND_URL, DEFAULT_FRONTEND_URL]) {
+    if (!raw) continue;
+    try {
+      hosts.add(new URL(raw).hostname);
+    } catch {
+      // ignore invalid env
+    }
+  }
+  return hosts;
+}
+
+function isAllowedFrontendHost(hostname) {
+  if (!hostname) return false;
+  if (allowedFrontendHosts().has(hostname)) return true;
+  // Vercel preview deployments for this project
+  return /\.vercel\.app$/i.test(hostname);
+}
+
 function isValidFrontendUrl(candidate, backendOrigin) {
   if (!candidate || typeof candidate !== 'string') return false;
 
@@ -16,7 +36,8 @@ function isValidFrontendUrl(candidate, backendOrigin) {
     const parsed = new URL(candidate);
     if (!['http:', 'https:'].includes(parsed.protocol)) return false;
     if (parsed.origin === backendOrigin) return false;
-    return true;
+    if (parsed.username || parsed.password) return false;
+    return isAllowedFrontendHost(parsed.hostname);
   } catch {
     return false;
   }
@@ -50,7 +71,18 @@ function resolveFrontendUrl(req) {
     stateHint = '';
   }
 
+  const headerFrontend = req.get?.('x-frontend-url') || req.headers?.['x-frontend-url'];
+  const oauthRedirect = req.get?.('x-oauth-redirect-uri') || req.headers?.['x-oauth-redirect-uri'];
+  let oauthRedirectOrigin = '';
+  try {
+    oauthRedirectOrigin = oauthRedirect ? new URL(String(oauthRedirect)).origin : '';
+  } catch {
+    oauthRedirectOrigin = '';
+  }
+
   const candidates = [
+    headerFrontend,
+    oauthRedirectOrigin,
     req.query?.frontend,
     req.cookies?.frontend_url,
     refererOrigin,
